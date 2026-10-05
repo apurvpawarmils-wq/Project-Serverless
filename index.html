@@ -28,6 +28,8 @@ fieldset{border:1px solid var(--border);border-radius:10px;margin:8px 0;padding:
 legend{font-weight:600;font-size:.82rem;padding:0 6px;}
 .btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:.85rem;cursor:pointer;margin-top:10px;margin-right:6px;}
 .btn.sec{background:var(--muted);}
+.btn:disabled{cursor:progress;opacity:1;}
+.btn.progress{background:linear-gradient(90deg,var(--accent2) var(--p,0%),var(--accent) var(--p,0%));}
 .btn.danger{background:var(--bad);padding:4px 9px;font-size:.72rem;margin:0;}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px;}
 .stat{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:10px;padding:12px;text-align:center;box-shadow:0 1px 3px rgba(20,30,60,.06);}
@@ -134,7 +136,7 @@ th{color:var(--muted);font-weight:600;}
       <legend>Bulk Upload Participants (Excel)</legend>
       <p class="def">Upload an .xlsx with participant columns (Name, ID No., Category, Department, IUs/GUs, Contractor). If your file also has its own Training Topic / From Date / To Date / Venue / Trainer columns, those are used per row automatically — otherwise the Training Details filled in above apply to every row. Multiple sheets in one file are all read; a title/banner row above your real headers is detected and skipped automatically.</p>
       <input type="file" id="bulkFile" accept=".xlsx,.xls">
-      <button type="button" class="btn sec" id="bulkUploadBtn" onclick="bulkUpload()">Upload & Add All</button>
+      <button type="button" class="btn" id="bulkUploadBtn" onclick="bulkUpload()">Upload & Add All</button>
       <div id="bulkMsg" class="def"></div>
     </fieldset>
   </form>
@@ -299,6 +301,7 @@ function setStatus(msg, state){
   const dot=document.getElementById('syncDot');
   if(dot){ dot.className='syncDot'+(state==='ok'?' ok':state==='err'?' err pulse':' pulse'); }
 }
+const BULK_CONCURRENCY=12; // bulk participant upload only; lower it if rows fail
 const CONCURRENCY=5; // parallel requests to the sheet; set to 1 if you ever see mixed-up IDs
 async function runPool(items,worker,limit){
   let i=0; const n=Math.min(limit||CONCURRENCY,items.length);
@@ -384,6 +387,7 @@ async function bulkUpload(){
   const f = document.getElementById('bulkFile').files[0];
   if(!f){ alert('Choose an Excel file first.'); return; }
   btn.disabled = true; const oldText = btn.textContent;
+  btn.classList.add('progress'); btn.style.setProperty('--p','0%'); btn.textContent='Reading file…';
   const buf = await f.arrayBuffer();
   const wb = XLSX.read(buf,{type:'array', cellDates:true});
   const nameOf = row => pick(row,['employee / cwm name','name','employee name','full name','participant name','cwm name'])
@@ -422,7 +426,7 @@ async function bulkUpload(){
   });
   const recs = allRecs.filter(r=>r.pname);
   if(allRows.length && recs.length===0){
-    btn.disabled = false; btn.textContent = oldText;
+    btn.disabled = false; btn.textContent = oldText; btn.classList.remove('progress');
     const headers = allRows[0] ? Object.keys(allRows[0]) : [];
     document.getElementById('bulkMsg').innerHTML = '0 participant(s) added — couldn\'t find a Name column. '
       + 'Detected column headers: <strong>' + headers.join(', ') + '</strong>. '
@@ -430,12 +434,15 @@ async function bulkUpload(){
     return;
   }
   let n=0, failed=0, doneCount=0;
+  btn.textContent='Uploading 0 / '+recs.length+'…';
   await runPool(recs, async rec=>{
     const res=await apiAdd('participants', rec);
     if(res&&res.ok){ participants.push(Object.assign({id:res.id},rec)); n++; } else failed++;
-    btn.textContent='Uploading '+(++doneCount)+' / '+recs.length+'…';
-  });
-  btn.disabled = false; btn.textContent = oldText;
+    doneCount++;
+    btn.style.setProperty('--p',(doneCount/recs.length*100).toFixed(1)+'%');
+    btn.textContent='Uploading '+doneCount+' / '+recs.length+' ('+Math.round(doneCount/recs.length*100)+'%)';
+  }, BULK_CONCURRENCY);
+  btn.disabled = false; btn.textContent = oldText; btn.classList.remove('progress'); btn.style.removeProperty('--p');
   document.getElementById('bulkFile').value = '';
   document.getElementById('bulkMsg').textContent = n+' participant(s) added'+(failed?', '+failed+' failed':'')+(allRows.length>recs.length? ', '+(allRows.length-recs.length)+' skipped (no name found)':'')+'.';
   fillAssessSel(); renderSearch(); fillProfileSel(); renderDash(); saveCache();
