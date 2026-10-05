@@ -104,7 +104,7 @@ details.fold details.fold>summary .cnt{background:var(--violet);}
 <div class="hero"><div class="wrap" style="padding:0;"><span>CENTRAL L&amp;D</span><h1>Post-Training Effectiveness Dashboard</h1></div></div>
 <div class="wrap">
 <div id="chartWarn" class="card hidden" style="color:var(--bad);font-size:.8rem;">Charts library could not load. Please refresh; if it persists, check network access to cdn.jsdelivr.net.</div>
-<div class="syncPill"><span class="syncDot pulse" id="syncDot"></span><span id="syncStatus">Loading data…</span></div>
+<div class="syncPill" style="cursor:pointer;" title="Click to sync now" onclick="refreshAll(true)"><span class="syncDot pulse" id="syncDot"></span><span id="syncStatus">Loading data…</span></div>
 <div class="tabs">
   <div class="tab active" data-t="reg">Register</div>
   <div class="tab" data-t="search">Search</div>
@@ -327,35 +327,105 @@ function renderAllViews(){
 }
 let hadCache=false;
 try{ const c=JSON.parse(localStorage.getItem('ptd_cache')||'null'); if(c&&c.p&&c.a){ participants=c.p; assessments=c.a; hadCache=true; } }catch(e){}
-async function refreshAll(){
+let syncPaused=0; // >0 while a bulk write is running, so a background refresh can't collide with it
+const REFRESH_MS=30000; // background refresh interval — also re-syncs a couple of seconds after every save, so other units' changes show up quickly
+function renderCurrent(){
+  // only redraw what the person is looking at; other tabs redraw when opened
+  fillAssessSel();
+  const t=(document.querySelector('.tab.active')||{}).dataset; const tab=t&&t.t;
+  if(tab==='search') renderSearch();
+  else if(tab==='records') renderRecords();
+  else if(tab==='profile'){ fillProfileSel(); drawProfile(); }
+  else if(tab==='dash') renderDash();
+  else if(tab==='live') renderLive();
+}
+async function refreshAll(force){
   if(isRefreshing) return;
-  if(document.hidden && firstLoadDone) return;
+  if(syncPaused) return;
+  if(!force && document.hidden && firstLoadDone) return;
   isRefreshing=true;
   setStatus(firstLoadDone? 'Syncing…' : (hadCache? 'Showing saved data — syncing…' : 'Connecting…'), 'busy');
   try{
     const [p,a] = await Promise.all([apiList('participants'), apiList('assessments')]);
-    const changed = !firstLoadDone || (p && JSON.stringify(p)!==JSON.stringify(participants)) || (a && JSON.stringify(a)!==JSON.stringify(assessments));
-    if(p) participants=p;
-    if(a) assessments=a;
+    const mp = Array.isArray(p) ? mergeLocal('participants',p) : null;
+    const ma = Array.isArray(a) ? mergeLocal('assessments',a) : null;
+    const changed = !firstLoadDone || (mp && JSON.stringify(mp)!==JSON.stringify(participants)) || (ma && JSON.stringify(ma)!==JSON.stringify(assessments));
+    if(mp) participants=mp;
+    if(ma) assessments=ma;
     const bothOk = !!(p && a);
     firstLoadDone = true;
-    if(changed){ renderAllViews(); saveCache(); }
-    setStatus(bothOk? 'Up to date' : 'Partial data — retrying…', bothOk?'ok':'err');
+    if(changed){ renderCurrent(); saveCache(); }
+    setStatus(bothOk? 'Up to date · '+new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : 'Partial data — retrying…', bothOk?'ok':'err');
   } finally { isRefreshing=false; }
 }
 refreshAll();
-if(hadCache) setTimeout(renderAllViews,0);
-setInterval(refreshAll, 15000);
+if(hadCache) setTimeout(renderCurrent,0);
+setInterval(refreshAll, REFRESH_MS);
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden) refreshAll(); });
+['bulkUpload','uploadLiveResults'].forEach(n=>{ const f=window[n]; if(typeof f!=='function') return;
+  window[n]=async function(){ syncPaused++; try{ return await f.apply(this,arguments); } finally{ syncPaused--; setTimeout(()=>refreshAll(true),500); } }; });
 async function apiList(type){
   try{ const r = await fetch(API_URL+'?type='+type); return await r.json(); }catch(e){ console.error(e); return null; }
 }
+// ---- multi-user safety: retries + remembering this device's own recent changes ----
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const LOCAL_TTL=120000; // how long (ms) a local change is protected from being overwritten by an older server snapshot
+const localAdds=new Map(), localDeletes=new Map(), localUpdates=new Map();
+let syncTimer=null;
+function scheduleSync(){ clearTimeout(syncTimer); syncTimer=setTimeout(()=>refreshAll(true),2500); }
+// Apps Script serves many users at once and sometimes answers "busy" (or an HTML error page). Retry politely.
+async function postJSON(body, idempotent){
+  for(let attempt=0; attempt<4; attempt++){
+    try{
+      const r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)});
+      const j=await r.json();
+      if(j && j.ok===false && j.error==='busy' && attempt<3){ await sleep(700*Math.pow(2,attempt)+Math.random()*500); continue; }
+      return j;
+    }catch(e){
+      // non-JSON reply = server was too busy to run it, so retrying is safe. A dropped connection is only retried
+      // when repeating it can't create a duplicate (update / delete).
+      if(attempt<3 && (idempotent || e instanceof SyntaxError)){ await sleep(700*Math.pow(2,attempt)+Math.random()*500); continue; }
+      console.error(e); return null;
+    }
+  }
+  return null;
+}
 async function apiAdd(type,data){
-  try{ const r = await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({type,action:'add',data})});
-    return await r.json(); }catch(e){ console.error(e); return {ok:false}; }
+  const res=await postJSON({type,action:'add',data},false);
+  if(res&&res.ok){ localAdds.set(type+':'+res.id,{type,obj:Object.assign({id:res.id},data),t:Date.now()}); scheduleSync(); }
+  return res||{ok:false};
+}
+// One request for many rows (needs the updated Apps Script). If the script is the old one, report "unsupported"
+// so the caller can fall back to one-by-one adds.
+async function apiAddMany(type,recs){
+  const res=await postJSON({type,action:'addMany',data:recs},false);
+  if(res&&res.ok&&Array.isArray(res.ids)&&res.ids.length===recs.length){
+    const now=Date.now();
+    res.ids.forEach((id,i)=>localAdds.set(type+':'+id,{type,obj:Object.assign({id},recs[i]),t:now}));
+    scheduleSync(); return res;
+  }
+  if(res&&res.error==='unknown action') return {ok:false,unsupported:true};
+  return {ok:false};
 }
 async function apiDelete(type,id){
-  try{ await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({type,action:'delete',id})}); }catch(e){ console.error(e); }
+  localDeletes.set(type+':'+id,Date.now());
+  await postJSON({type,action:'delete',id},true);
+  scheduleSync();
+}
+// Merge the server snapshot with this device's own very recent changes, so a slightly-stale snapshot never makes
+// a record you just saved vanish, reappear after delete, or revert.
+function mergeLocal(type,server){
+  const now=Date.now(); const del=id=>{ const t=localDeletes.get(type+':'+id); return t&&now-t<LOCAL_TTL; };
+  const out=server.filter(x=>!del(x.id)).map(x=>{
+    const u=localUpdates.get(type+':'+x.id);
+    return (u&&now-u.t<LOCAL_TTL&&!(numv(x.ts)>numv(u.data.ts)&&numv(u.data.ts)>=0)) ? Object.assign({},x,u.data) : x;
+  });
+  const have=new Set(server.map(x=>String(x.id)));
+  localAdds.forEach((v,k)=>{ if(now-v.t>=LOCAL_TTL){ localAdds.delete(k); return; }
+    if(v.type===type && !have.has(String(v.obj.id)) && !del(v.obj.id)) out.push(v.obj); });
+  localUpdates.forEach((v,k)=>{ if(now-v.t>=LOCAL_TTL) localUpdates.delete(k); });
+  localDeletes.forEach((t,k)=>{ if(now-t>=LOCAL_TTL) localDeletes.delete(k); });
+  return out;
 }
 
 async function submitParticipant(ev){
@@ -448,13 +518,27 @@ async function bulkUpload(){
   }
   let n=0, failed=0, doneCount=0;
   btn.textContent='Uploading 0 / '+recs.length+'…';
-  await runPool(recs, async rec=>{
-    const res=await apiAdd('participants', rec);
-    if(res&&res.ok){ participants.push(Object.assign({id:res.id},rec)); n++; } else failed++;
-    doneCount++;
+  const progress=k=>{
+    doneCount+=k;
     btn.style.setProperty('--p',(doneCount/recs.length*100).toFixed(1)+'%');
     btn.textContent='Uploading '+doneCount+' / '+recs.length+' ('+Math.round(doneCount/recs.length*100)+'%)';
-  }, BULK_CONCURRENCY);
+  };
+  let batchOK=true; const chunks=[];
+  for(let i=0;i<recs.length;i+=25) chunks.push(recs.slice(i,i+25));
+  await runPool(chunks, async chunk=>{
+    const res = batchOK ? await apiAddMany('participants', chunk) : {ok:false,unsupported:true};
+    if(res.ok){ chunk.forEach((rec,i)=>participants.push(Object.assign({id:res.ids[i]},rec))); n+=chunk.length; progress(chunk.length); return; }
+    if(res.unsupported){
+      batchOK=false; // old Apps Script: add them one by one instead
+      await runPool(chunk, async rec=>{
+        const r1=await apiAdd('participants', rec);
+        if(r1&&r1.ok){ participants.push(Object.assign({id:r1.id},rec)); n++; } else failed++;
+        progress(1);
+      }, BULK_CONCURRENCY);
+      return;
+    }
+    failed+=chunk.length; progress(chunk.length);
+  }, 3);
   btn.disabled = false; btn.textContent = oldText; btn.classList.remove('progress'); btn.style.removeProperty('--p');
   document.getElementById('bulkFile').value = '';
   document.getElementById('bulkMsg').textContent = n+' participant(s) added'+(failed?', '+failed+' failed':'')+(allRows.length>recs.length? ', '+(allRows.length-recs.length)+' skipped (no name found)':'')+'.';
@@ -591,11 +675,24 @@ async function submitAssessment(ev){
     ratings,avgRating:avg,result:effectivenessLabel(avg),
     assessDate, assessedBy:document.getElementById('assessedBy').value, ts:Date.now(),
     lockEnabled: frozen, unlockDate};
-  const live = currentLive;
+  let live = currentLive;
+  if(live){
+    // Check the sheet first: another unit may have saved this same record while the form was open.
+    btn.textContent = 'Checking…';
+    const latest = await apiList('assessments');
+    if(Array.isArray(latest)){
+      const srv = latest.find(x=>String(x.id)===String(live.id));
+      if(!srv){ btn.disabled=false; btn.textContent=oldText; alert('This assessment was deleted by someone else. Please re-select the participant and start again.'); return; }
+      if(numv(srv.ts)>numv(live.ts) && !confirm('This assessment was just updated by '+(srv.assessedBy||'another user')+'. Saving now will replace their changes.\n\nPress OK to overwrite, or Cancel to stop and review the latest record.')){
+        btn.disabled=false; btn.textContent=oldText; Object.assign(live,srv); loadParticipant(); return;
+      }
+    }
+    btn.textContent = 'Saving…';
+  }
   const res = live ? await apiUpdate('assessments', live.id, rec) : await apiAdd('assessments', rec);
   btn.disabled = false; btn.textContent = oldText;
   if(res && (live ? res.ok!==false : res.ok)){
-    if(live) Object.assign(live, rec); else assessments.push(Object.assign({id:res.id}, rec));
+    if(live){ const cur = assessments.find(x=>String(x.id)===String(live.id)) || live; Object.assign(cur, rec); } else assessments.push(Object.assign({id:res.id}, rec));
     renderRecords(); drawProfile(); renderDash();
     resetAssessForm();
     showTab('records');
@@ -817,8 +914,9 @@ function renderLive(){
   renderCalendar();
 }
 async function apiUpdate(type,id,data){
-  try{ const r = await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({type,action:'update',id,data})});
-    return await r.json(); }catch(e){ console.error(e); return {ok:false}; }
+  const res=await postJSON({type,action:'update',id,data},true);
+  if(res&&res.ok!==false){ localUpdates.set(type+':'+id,{data:Object.assign({},data),t:Date.now()}); scheduleSync(); }
+  return res||{ok:false};
 }
 function parseScore(raw,totalField){
   const t=String(raw).trim(), m=t.match(/^([\d.]+)\s*\/\s*([\d.]+)$/);
