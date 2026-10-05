@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Post-Training Effectiveness Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{--bg:#f3f5fa;--card:#fff;--text:#1c1f26;--muted:#616977;--accent:#2f6fed;--accent2:#1746b0;--good:#17a673;--warn:#f5a524;--bad:#e5484d;--violet:#7c5cff;--border:#e1e4ea;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12141a;--card:#1c1f27;--text:#eceef2;--muted:#9aa1ad;--border:#2c303a;}}
+:root[data-theme="dark"]{--bg:#12141a;--card:#1c1f27;--text:#eceef2;--muted:#9aa1ad;--border:#2c303a;}
+*{box-sizing:border-box;}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
+.wrap{max-width:1150px;margin:0 auto;padding:0 14px 14px;}
+.hero{background:linear-gradient(135deg,var(--accent2),var(--accent) 60%,var(--violet));color:#fff;margin:0 -14px 14px;padding:18px 14px calc(18px + env(safe-area-inset-top,0px));border-radius:0 0 16px 16px;}
+.hero h1{font-size:1.3rem;margin:0;}
+.hero span{font-size:.75rem;opacity:.85;}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);padding:6px 0;z-index:5;}
+.tab{padding:7px 12px;border-radius:8px;border:1px solid var(--border);background:var(--card);cursor:pointer;font-size:.8rem;}
+.tab.active{background:linear-gradient(135deg,var(--accent2),var(--accent));color:#fff;border-color:var(--accent);}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(20,30,60,.06);}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;}
+label{display:block;font-size:.75rem;color:var(--muted);margin:7px 0 3px;}
+input,select{width:100%;padding:6px 7px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem;}
+fieldset{border:1px solid var(--border);border-radius:10px;margin:8px 0;padding:10px;}
+legend{font-weight:600;font-size:.82rem;padding:0 6px;}
+.btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:.85rem;cursor:pointer;margin-top:10px;margin-right:6px;}
+.btn.sec{background:var(--muted);}
+.btn.danger{background:var(--bad);padding:4px 9px;font-size:.72rem;margin:0;}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px;}
+.stat{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:10px;padding:12px;text-align:center;box-shadow:0 1px 3px rgba(20,30,60,.06);}
+.stat:nth-child(2){border-left-color:var(--good);} .stat:nth-child(3){border-left-color:var(--violet);}
+.stat:nth-child(4){border-left-color:var(--good);} .stat:nth-child(5){border-left-color:var(--warn);} .stat:nth-child(6){border-left-color:var(--bad);}
+.stat b{font-size:1.25rem;display:block;color:var(--text);}
+.stat span{font-size:.7rem;color:var(--muted);}
+table{width:100%;border-collapse:collapse;font-size:.72rem;}
+th,td{border-bottom:1px solid var(--border);padding:5px 4px;text-align:left;white-space:nowrap;}
+th{color:var(--muted);font-weight:600;}
+.tablewrap{overflow-x:auto;}
+.hidden{display:none;}
+.def{font-size:.68rem;color:var(--muted);margin:0 0 4px;}
+.badge{display:inline-block;border-radius:14px;padding:2px 9px;font-size:.72rem;font-weight:600;color:#fff;}
+.b-good{background:var(--good);} .b-warn{background:var(--warn);} .b-bad{background:var(--bad);}
+.searchRow{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding:6px 0;font-size:.8rem;}
+.gaugeGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:16px;margin:12px 0 4px;}
+.gaugeCell{text-align:center;}
+.gauge{width:104px;height:104px;border-radius:50%;margin:0 auto;position:relative;display:flex;align-items:center;justify-content:center;}
+.gauge::before{content:"";position:absolute;inset:9px;background:var(--card);border-radius:50%;}
+.gauge b{position:relative;font-size:1.05rem;z-index:1;}
+.gaugeLabel{font-size:.7rem;color:var(--muted);margin-top:6px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;}
+.barRow{margin:9px 0;}
+.barLabel{display:flex;justify-content:space-between;font-size:.75rem;margin-bottom:3px;}
+.barTrack{background:var(--border);border-radius:20px;height:13px;overflow:hidden;}
+.barFill{height:100%;border-radius:20px;transition:width .4s;}
+.donutWrap{position:relative;max-width:220px;margin:8px auto;}
+.donutCenter{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+.donutCenter b{font-size:1.15rem;}
+.donutCenter span{font-size:.65rem;color:var(--muted);}
+.syncPill{display:inline-flex;align-items:center;gap:7px;font-size:.75rem;color:var(--muted);background:var(--card);border:1px solid var(--border);border-radius:20px;padding:5px 12px;margin-bottom:10px;}
+.syncDot{width:8px;height:8px;border-radius:50%;background:var(--warn);flex-shrink:0;}
+.syncDot.ok{background:var(--good);animation:none;}
+.syncDot.err{background:var(--bad);}
+.syncDot.pulse{animation:pulse 1s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.25;}}
+.resultRow{display:flex;justify-content:space-between;align-items:center;border-left:4px solid var(--good);background:var(--card);border-radius:8px;padding:8px 12px;margin:6px 0;font-size:.8rem;}
+.resultRow.need{border-left-color:var(--bad);}
+.lockBadge{display:inline-block;background:var(--warn);color:#fff;border-radius:12px;padding:2px 8px;font-size:.68rem;}
+.openBadge{display:inline-block;background:var(--good);color:#fff;border-radius:12px;padding:2px 8px;font-size:.68rem;}
+.modalBack{position:fixed;inset:0;background:rgba(10,14,25,.55);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px;}
+.modalBack.hidden{display:none;}
+.calHead{display:flex;justify-content:space-between;align-items:center;margin:8px 0;}
+.calHead .btn{margin:0;padding:4px 12px;}
+.calGrid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;}
+.calDow{font-size:.65rem;color:var(--muted);text-align:center;font-weight:700;}
+.calDay{min-height:38px;border:1px solid var(--border);border-radius:6px;padding:3px 4px;font-size:.7rem;}
+.calDay.today{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);}
+.calDay.ev{background:rgba(47,111,237,.16);}
+.calDay i{display:block;font-style:normal;color:var(--accent);font-size:.6rem;}
+.sessRow{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--border);padding:8px 0;font-size:.78rem;}
+.sessRow .btn{margin:0;padding:5px 10px;font-size:.72rem;}
+.liveNow{border-left:4px solid var(--good);}
+.modalBox{background:var(--card);color:var(--text);border-radius:14px;max-width:380px;width:100%;padding:22px 20px;text-align:center;border-top:6px solid var(--bad);box-shadow:0 10px 30px rgba(0,0,0,.3);}
+.modalBox h2{margin:0 0 6px;font-size:1.15rem;color:var(--bad);}
+.modalBox p{font-size:.85rem;margin:6px 0;}
+.modalBox .def{margin-top:8px;}
+</style>
+</head>
+<body>
+<div id="trainModal" class="modalBack hidden"><div class="modalBox"><h2>⚠ Needs Training</h2><p id="trainModalMsg"></p><p class="def" id="trainModalNote"></p><button class="btn" type="button" onclick="closeTrainModal()">OK</button></div></div>
+<div class="hero"><div class="wrap" style="padding:0;"><span>CENTRAL L&amp;D</span><h1>Post-Training Effectiveness Dashboard</h1></div></div>
+<div class="wrap">
+<div id="chartWarn" class="card hidden" style="color:var(--bad);font-size:.8rem;">Charts library could not load. Please refresh; if it persists, check network access to cdn.jsdelivr.net.</div>
+<div class="syncPill"><span class="syncDot pulse" id="syncDot"></span><span id="syncStatus">Loading data…</span></div>
+<div class="tabs">
+  <div class="tab active" data-t="reg">Register</div>
+  <div class="tab" data-t="search">Search</div>
+  <div class="tab" data-t="assess">Assessment</div>
+  <div class="tab" data-t="live">Live Session</div>
+  <div class="tab" data-t="records">Total Records</div>
+  <div class="tab" data-t="profile">Learning Profile</div>
+  <div class="tab" data-t="dash">Dashboard</div>
+</div>
+
+<!-- REGISTER -->
+<div id="view-reg">
+  <form class="card" id="regForm" onsubmit="return submitParticipant(event)">
+    <fieldset>
+      <legend>Training Details</legend>
+      <div class="grid">
+        <div><label>Training Title</label><input id="title" required></div>
+        <div><label>Mode</label><select id="mode"><option>Classroom</option><option>On-the-job</option><option>Virtual</option></select></div>
+        <div><label>From Date</label><input id="fromDate" type="date" required oninput="calcDuration()"></div>
+        <div><label>To Date</label><input id="toDate" type="date" required oninput="calcDuration()"></div>
+        <div><label>Duration (days)</label><input id="duration" readonly></div>
+        <div><label>Trainer's Name</label><input id="trainer"></div>
+        <div><label>Location</label><input id="location"></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Participant Details</legend>
+      <div class="grid">
+        <div><label>Employee / CWM Name</label><input id="pname" required></div>
+        <div><label>ID No.</label><input id="pid"></div>
+        <div><label>Category</label><input id="category"></div>
+        <div><label>Department</label><input id="department"></div>
+        <div><label>IUs / GUs</label><input id="ius"></div>
+        <div><label>Contractor for CWM</label><input id="contractor"></div>
+      </div>
+      <button class="btn" type="submit" id="addParticipantBtn">Add Participant</button>
+    </fieldset>
+    <fieldset>
+      <legend>Bulk Upload Participants (Excel)</legend>
+      <p class="def">Upload an .xlsx with columns: Employee/CWM Name, ID No., Category, Department, IUs/GUs, Contractor for CWM. Fill Training Details above first — it applies to every uploaded row.</p>
+      <input type="file" id="bulkFile" accept=".xlsx,.xls">
+      <button type="button" class="btn sec" id="bulkUploadBtn" onclick="bulkUpload()">Upload & Add All</button>
+      <div id="bulkMsg" class="def"></div>
+    </fieldset>
+  </form>
+</div>
+
+<!-- SEARCH -->
+<div id="view-search" class="hidden">
+  <div class="card">
+    <label>Search registered participants (name, ID, department, training)</label>
+    <input id="searchBox" oninput="renderSearch()" placeholder="Type to search...">
+    <div id="searchResults" style="margin-top:8px;"></div>
+  </div>
+</div>
+
+<!-- ASSESSMENT -->
+<div id="view-assess" class="hidden">
+  <form class="card" id="assessForm" onsubmit="return submitAssessment(event)">
+    <fieldset>
+      <legend>Select Participant</legend>
+      <select id="assessPart" onchange="loadParticipant()"></select>
+      <div class="def" id="partInfo"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Pre & Post Test (out of 10) — Learning Index = (Post% − Pre%) / (100 − Pre%) × 100</legend>
+      <div class="grid">
+        <div><label>Pre-Test Score (/10)</label><input id="pre" type="number" min="0" max="10" step="0.5" required oninput="recalc()"></div>
+        <div><label>Post-Test Score (/10)</label><input id="post" type="number" min="0" max="10" step="0.5" required oninput="recalc()"></div>
+        <div><label>Pre-Test %</label><input id="prePct" readonly></div>
+        <div><label>Post-Test %</label><input id="postPct" readonly></div>
+        <div><label>Learning Index (%)</label><input id="li" readonly></div>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:10px;"><input type="checkbox" id="freezePre" onchange="toggleFreeze()" style="width:auto;"> 🔒 Freeze Pre-Test Score for 30 days (Owner) — Post-Test stays locked until then</label>
+      <p class="def" id="freezeNote" style="display:none;margin-top:4px;">Post-Test is locked for this submission. Come back after the 30-day window and use the <strong>Live Session</strong> tab to upload the Post-Test score.</p>
+    </fieldset>
+    <fieldset>
+      <legend>Training Effectiveness Assessment Parameters — Rating Scale 1=Poor, 2=Fair, 3=Good, 4=Very Good, 5=Excellent</legend>
+      <div id="enablerGrid"></div>
+      <div class="grid"><div><label>Average Rating (/5)</label><input id="avgRating" readonly></div>
+      <div><label>Post Training Effectiveness Result</label><input id="resultBox" readonly></div></div>
+    </fieldset>
+    <fieldset>
+      <legend>Assessment</legend>
+      <div class="grid">
+        <div><label>Assessment Date</label><input id="assessDate" type="date" required></div>
+        <div><label>Assessed By</label><input id="assessedBy" required></div>
+      </div>
+    </fieldset>
+    <button class="btn" type="submit" id="submitAssessBtn">Submit Assessment</button>
+    <button class="btn sec" type="button" onclick="resetAssessForm()">Reset</button>
+  </form>
+</div>
+
+<!-- LIVE SESSION -->
+<div id="view-live" class="hidden">
+  <div id="liveNow"></div>
+  <div class="card">
+    <p class="def" style="font-weight:600;margin-bottom:6px;">Upload Test Results (Google Form export)</p>
+    <p class="def">Pre-Test results of a running session are added automatically to Assessment, Search, Records, Profile and Dashboard (new participants are registered too). Excel columns: Name, Score (optional: ID No., Department, Category, IUs/GUs, Contractor). Scores like "8 / 10" from Google Forms are read automatically.</p>
+    <div class="grid">
+      <div><label>Result Type</label><select id="liveType"><option value="pre">Pre-Test (current session)</option><option value="post">Post-Test (after 30 days)</option></select></div>
+      <div><label>Training</label><input id="liveTraining" list="trainingList" placeholder="Type or pick a training title"></div>
+      <div><label>Session Date</label><input id="liveDate" type="date"></div>
+      <div><label>Total Marks (blank if score is like 8 / 10)</label><input id="liveTotalMarks" type="number" min="1" step="1"></div>
+      <div><label>Results File</label><input id="liveResultFile" type="file" accept=".xlsx,.xls"></div>
+    </div>
+    <datalist id="trainingList"></datalist>
+    <button class="btn" type="button" id="uploadResultsBtn" onclick="uploadLiveResults()">Upload Results</button>
+    <div id="resultMsg" class="def" style="margin-top:6px;"></div>
+  </div>
+  <div id="liveBanner"></div>
+  <div class="card">
+    <p class="def" style="font-weight:600;margin-bottom:2px;">Upcoming Training Calendar</p>
+    <p class="def">Sample schedule shown for demonstration.</p>
+    <div class="calHead"><button class="btn sec" type="button" onclick="calMove(-1)">&lsaquo;</button><b id="calTitle"></b><button class="btn sec" type="button" onclick="calMove(1)">&rsaquo;</button></div>
+    <div class="calGrid" id="calGrid"></div>
+    <div id="calList" style="margin-top:10px;"></div>
+  </div>
+</div>
+
+<!-- TOTAL RECORDS -->
+<div id="view-records" class="hidden">
+  <div class="card">
+    <button class="btn" onclick="exportExcel()">Export to Excel</button>
+    <div class="tablewrap"><table id="recTable"><thead></thead><tbody></tbody></table></div>
+  </div>
+</div>
+
+<!-- LEARNING PROFILE -->
+<div id="view-profile" class="hidden">
+  <div class="card">
+    <label>Select Participant</label>
+    <select id="profileSel" onchange="drawProfile()"></select>
+    <div class="stats" id="profileStats" style="margin-top:10px;"></div>
+    <p class="def" style="margin-top:14px;font-weight:600;">Score Snapshot</p>
+    <div class="gaugeGrid" id="profileGauges"></div>
+    <p class="def" style="margin-top:16px;font-weight:600;">Individual Learning (Pre-Test / Post-Test / Learning Index)</p>
+    <div style="position:relative;height:220px;"><canvas id="profileLearningChart"></canvas></div>
+    <p class="def" style="margin-top:16px;font-weight:600;">Individual Ratings by Assessment Parameter</p>
+    <div style="position:relative;height:240px;"><canvas id="profileRatingChart"></canvas></div>
+  </div>
+</div>
+
+<!-- DASHBOARD -->
+<div id="view-dash" class="hidden">
+  <div class="stats" id="statsBox"></div>
+  <div class="card">
+    <p class="def" style="font-weight:600;margin-bottom:2px;">All Participants — Average Pre-Test vs Post-Test (%) with Improvement Line</p>
+    <p class="def" id="capTrainings1" style="margin:0 0 8px;"></p>
+    <div id="ppBadge" style="margin-bottom:8px;"></div>
+    <div style="position:relative;height:300px;"><canvas id="dashPrePostChart"></canvas></div>
+  </div>
+  <div class="card">
+    <p class="def" style="font-weight:600;margin-bottom:2px;">Training Effectiveness Assessment Parameters — Overall Average Score (/5)</p>
+    <p class="def" id="capTrainings2" style="margin:0 0 8px;"></p>
+    <div style="position:relative;height:280px;"><canvas id="dashParamChart"></canvas></div>
+  </div>
+  <div class="card">
+    <p class="def" style="font-weight:600;margin-bottom:2px;">Unit-wise Participation (bars) and Average Assessment Score (line, /5)</p>
+    <p class="def" id="capTrainings3" style="margin:0 0 8px;"></p>
+    <div style="overflow-x:auto;"><div id="unitWrap" style="position:relative;height:300px;min-width:100%;"><canvas id="dashUnitChart"></canvas></div></div>
+  </div>
+</div>
+
+
+</div>
+<script>
+const ENABLERS = [
+ ["Application of Learnings","Consistent adherence to operating parameters / PM tasks / basic troubleshooting without supervision"],
+ ["Operational Efficiency","Reduction in rework & wastage / idle time due to mistakes / accuracy in fault identification"],
+ ["Safe Work Practices","Adherence to SOPs & safety norms / safe tool use / proper housekeeping"],
+ ["Work Place Coordination","Reporting faults, downtime & hazards / acting on instructions accurately"],
+ ["Behaviour","Following SOPs without shortcuts / punctuality & discipline"],
+ ["Coaching & Peer Support","Helping less-skilled co-workers / volunteering improvement ideas"]
+];
+const RATINGOPTS = [[1,"1 - Poor"],[2,"2 - Fair"],[3,"3 - Good"],[4,"4 - Very Good"],[5,"5 - Excellent"]];
+
+document.getElementById('enablerGrid').innerHTML = ENABLERS.map((e,i)=>`
+  <div style="margin:8px 0;"><label>${e[0]}</label><div class="def">${e[1]}</div>
+  <select id="r${i}" onchange="recalc()">${RATINGOPTS.map(o=>`<option value="${o[0]}">${o[1]}</option>`).join('')}</select></div>`).join('');
+
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>showTab(t.dataset.t));
+function showTab(t){
+  document.querySelectorAll('[id^="view-"]').forEach(v=>v.classList.toggle('hidden', v.id!=='view-'+t));
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active', x.dataset.t===t));
+  if(t==='search') renderSearch();
+  if(t==='records') renderRecords();
+  if(t==='profile') { fillProfileSel(); drawProfile(); }
+  if(t==='dash') renderDash();
+  if(t==='assess') fillAssessSel();
+  if(t==='live') renderLive();
+}
+
+function calcDuration(){
+  const f=document.getElementById('fromDate').value, tt=document.getElementById('toDate').value;
+  if(f&&tt){ const d=(new Date(tt)-new Date(f))/86400000+1; document.getElementById('duration').value = d>0? d+' day(s)':''; }
+}
+
+const API_URL = "https://script.google.com/macros/s/AKfycby_1i6lb3MCSQhibQOvNY6MZ1_v4N9keJk8_dseraVYpDCMTP5olmblUElk69n2kE2D/exec";
+let participants=[], assessments=[], isRefreshing=false, firstLoadDone=false;
+function setStatus(msg, state){
+  const el=document.getElementById('syncStatus'); if(el) el.textContent=msg;
+  const dot=document.getElementById('syncDot');
+  if(dot){ dot.className='syncDot'+(state==='ok'?' ok':state==='err'?' err pulse':' pulse'); }
+}
+const CONCURRENCY=5; // parallel requests to the sheet; set to 1 if you ever see mixed-up IDs
+async function runPool(items,worker,limit){
+  let i=0; const n=Math.min(limit||CONCURRENCY,items.length);
+  await Promise.all(Array.from({length:n},async()=>{ while(i<items.length){ const k=i++; await worker(items[k],k); } }));
+}
+function saveCache(){ try{ localStorage.setItem('ptd_cache',JSON.stringify({p:participants,a:assessments})); }catch(e){} }
+function renderAllViews(){
+  fillAssessSel(); renderSearch(); fillProfileSel(); renderRecords(); drawProfile(); renderDash();
+  if(!document.getElementById('view-live').classList.contains('hidden')) renderLive();
+}
+let hadCache=false;
+try{ const c=JSON.parse(localStorage.getItem('ptd_cache')||'null'); if(c&&c.p&&c.a){ participants=c.p; assessments=c.a; hadCache=true; } }catch(e){}
+async function refreshAll(){
+  if(isRefreshing) return;
+  if(document.hidden && firstLoadDone) return;
+  isRefreshing=true;
+  setStatus(firstLoadDone? 'Syncing…' : (hadCache? 'Showing saved data — syncing…' : 'Connecting…'), 'busy');
+  try{
+    const [p,a] = await Promise.all([apiList('participants'), apiList('assessments')]);
+    const changed = !firstLoadDone || (p && JSON.stringify(p)!==JSON.stringify(participants)) || (a && JSON.stringify(a)!==JSON.stringify(assessments));
+    if(p) participants=p;
+    if(a) assessments=a;
+    const bothOk = !!(p && a);
+    firstLoadDone = true;
+    if(changed){ renderAllViews(); saveCache(); }
+    setStatus(bothOk? 'Up to date' : 'Partial data — retrying…', bothOk?'ok':'err');
+  } finally { isRefreshing=false; }
+}
+refreshAll();
+if(hadCache) setTimeout(renderAllViews,0);
+setInterval(refreshAll, 15000);
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) refreshAll(); });
+async function apiList(type){
+  try{ const r = await fetch(API_URL+'?type='+type); return await r.json(); }catch(e){ console.error(e); return null; }
+}
+async function apiAdd(type,data){
+  try{ const r = await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({type,action:'add',data})});
+    return await r.json(); }catch(e){ console.error(e); return {ok:false}; }
+}
+async function apiDelete(type,id){
+  try{ await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({type,action:'delete',id})}); }catch(e){ console.error(e); }
+}
+
+async function submitParticipant(ev){
+  ev.preventDefault();
+  const btn = document.getElementById('addParticipantBtn');
+  if(btn.disabled) return;
+  btn.disabled = true; const oldText = btn.textContent; btn.textContent = 'Saving…';
+  const rec = {title:title.value,mode:mode.value,fromDate:fromDate.value,toDate:toDate.value,duration:duration.value,trainer:trainer.value,location:location.value,
+    pname:pname.value,pid:pid.value,category:category.value,department:department.value,ius:ius.value,contractor:contractor.value,ts:Date.now()};
+  const res = await apiAdd('participants', rec);
+  if(res && res.ok){
+    participants.push(Object.assign({id:res.id}, rec));
+    fillAssessSel(); renderSearch(); fillProfileSel(); renderDash();
+    document.getElementById('pname').value=''; document.getElementById('pid').value=''; document.getElementById('category').value='';
+    document.getElementById('department').value=''; document.getElementById('ius').value=''; document.getElementById('contractor').value='';
+    btn.textContent = 'Added ✓';
+  } else {
+    btn.textContent = 'Failed — tap to retry';
+  }
+  setTimeout(()=>{ btn.disabled=false; btn.textContent=oldText; }, res && res.ok ? 1200 : 0);
+  saveCache();
+}
+
+function normKey(k){ return (k||'').toString().replace(/\s+/g,'').toLowerCase(); }
+function pick(row,names){ const nn=names.map(normKey); for(const k in row){ if(nn.includes(normKey(k))) return row[k]; } return ''; }
+async function bulkUpload(){
+  const btn = document.getElementById('bulkUploadBtn');
+  if(btn.disabled) return;
+  const f = document.getElementById('bulkFile').files[0];
+  if(!f){ alert('Choose an Excel file first.'); return; }
+  if(!title.value||!fromDate.value||!toDate.value){ alert('Fill Training Details above first.'); return; }
+  btn.disabled = true; const oldText = btn.textContent;
+  const buf = await f.arrayBuffer();
+  const wb = XLSX.read(buf,{type:'array'});
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+  const recs=rows.map(row=>({title:title.value,mode:mode.value,fromDate:fromDate.value,toDate:toDate.value,duration:duration.value,trainer:trainer.value,location:location.value,
+      pname:pick(row,['employee / cwm name','name','employee name']),
+      pid:pick(row,['id no.','id no','id']),
+      category:pick(row,['category']),
+      department:pick(row,['department','department ']),
+      ius:pick(row,['ius / gus','ius/gus','ius','unit','gus']),
+      contractor:pick(row,['contractor for cwm','contractor']), ts:Date.now()})).filter(r=>r.pname);
+  let n=0, failed=0, doneCount=0;
+  await runPool(recs, async rec=>{
+    const res=await apiAdd('participants', rec);
+    if(res&&res.ok){ participants.push(Object.assign({id:res.id},rec)); n++; } else failed++;
+    btn.textContent='Uploading '+(++doneCount)+' / '+recs.length+'…';
+  });
+  btn.disabled = false; btn.textContent = oldText;
+  document.getElementById('bulkFile').value = '';
+  document.getElementById('bulkMsg').textContent = n+' participant(s) added'+(failed?', '+failed+' failed':'')+'.';
+  fillAssessSel(); renderSearch(); fillProfileSel(); renderDash(); saveCache();
+}
+
+function renderSearch(){
+  const q = (document.getElementById('searchBox')?.value||'').toLowerCase();
+  const list = participants.filter(p=>!q || [p.pname,p.pid,p.department,p.title].join(' ').toLowerCase().includes(q));
+  document.getElementById('searchResults').innerHTML = list.map(p=>
+    `<div class="searchRow"><span>${esc(p.pname)} — ${esc(p.department||'')} — ${esc(p.title||'')}${preTag(p)}</span>
+     <button class="btn" style="margin:0;padding:5px 10px;" onclick="goAssess('${p.id}')">Assess</button></div>`
+  ).join('') || '<p class="def">No participants found.</p>';
+}
+function preTag(p){ const a=assessments.find(x=>x.participantId===p.id); return a&&numv(a.pre)>=0?` <span class="openBadge">Pre ${a.pre}/10</span>`:''; }
+function goAssess(id){ showTab('assess'); document.getElementById('assessPart').value=id; loadParticipant(); }
+
+function fillAssessSel(){
+  const sel=document.getElementById('assessPart'); const cur=sel.value;
+  sel.innerHTML = '<option value="">-- select --</option>'+participants.map(p=>`<option value="${p.id}">${p.pname} (${p.title||''})</option>`).join('');
+  if(cur) sel.value=cur;
+}
+let currentLive=null;
+function loadParticipant(){
+  const id=document.getElementById('assessPart').value;
+  const p=participants.find(x=>x.id===id);
+  let info=p? `Dept: ${p.department||'-'} | Training: ${p.title||'-'} | Duration: ${p.duration||'-'}` : '';
+  currentLive=assessments.find(a=>a.participantId===id&&a.result==='Pending')||null;
+  const preEl=document.getElementById('pre'), postEl=document.getElementById('post'), fr=document.getElementById('freezePre');
+  preEl.readOnly=false; postEl.readOnly=false;
+  if(currentLive){
+    preEl.value=currentLive.pre; preEl.readOnly=true;
+    if(numv(currentLive.post)>=0){ fr.checked=false; toggleFreeze(); postEl.value=currentLive.post; postEl.readOnly=true; }
+    else { fr.checked=true; toggleFreeze(); }
+    info+=' | Pre-Test fetched from Live Session: '+currentLive.pre+'/10';
+  }
+  document.getElementById('partInfo').textContent=info; recalc();
+}
+
+function toggleFreeze(){
+  const frozen = document.getElementById('freezePre').checked;
+  const postInput = document.getElementById('post');
+  postInput.disabled = frozen;
+  postInput.required = !frozen;
+  if(frozen) postInput.value = '';
+  document.getElementById('freezeNote').style.display = frozen? '' : 'none';
+  recalc();
+}
+function recalc(){
+  const frozen = document.getElementById('freezePre') && document.getElementById('freezePre').checked;
+  const pre=parseFloat(document.getElementById('pre').value)||0;
+  const post=frozen? 0 : (parseFloat(document.getElementById('post').value)||0);
+  const prePct=pre*10, postPct=post*10;
+  document.getElementById('prePct').value = prePct.toFixed(0)+'%';
+  document.getElementById('postPct').value = frozen? '—' : postPct.toFixed(0)+'%';
+  if(frozen){
+    document.getElementById('li').value = 'Pending — locked 30 days';
+  } else {
+    let li;
+    if(prePct>=100){ li = postPct>=100?100:0; } else { li = Math.max(0,Math.min(100,((postPct-prePct)/(100-prePct))*100)); }
+    document.getElementById('li').value = li.toFixed(1)+'%';
+  }
+  const ratings = ENABLERS.map((_,i)=>parseInt(document.getElementById('r'+i).value)||0);
+  const avg = ratings.reduce((a,b)=>a+b,0)/ratings.length;
+  document.getElementById('avgRating').value = avg.toFixed(2);
+  const res = effectivenessLabel(avg);
+  document.getElementById('resultBox').value = res;
+}
+function effectivenessLabel(avg){
+  if(avg<=3) return 'Insignificant';
+  if(avg>4) return 'Significant';
+  return 'Moderately Effective';
+}
+recalc();
+
+function showNeedsTraining(name,title,avg,extra){
+  document.getElementById('trainModalMsg').textContent = name+' scored '+avg.toFixed(2)+' / 5 (Insignificant) for '+(title||'this training')+'. This participant needs training.';
+  document.getElementById('trainModalNote').textContent = extra||'';
+  document.getElementById('trainModal').classList.remove('hidden');
+}
+function closeTrainModal(){ document.getElementById('trainModal').classList.add('hidden'); }
+function resetAssessForm(){ document.getElementById('assessForm').reset(); currentLive=null; document.getElementById('pre').readOnly=false; document.getElementById('post').readOnly=false; document.getElementById('partInfo').textContent=''; toggleFreeze(); }
+
+async function submitAssessment(ev){
+  ev.preventDefault();
+  const btn = document.getElementById('submitAssessBtn');
+  if(btn.disabled) return;
+  const pid = document.getElementById('assessPart').value;
+  const p = participants.find(x=>x.id===pid);
+  if(!p){ alert('Select a participant.'); return; }
+  const frozen = document.getElementById('freezePre').checked;
+  btn.disabled = true; const oldText = btn.textContent; btn.textContent = 'Saving…';
+  const ratings = ENABLERS.map((e,i)=>({name:e[0],value:parseInt(document.getElementById('r'+i).value)}));
+  const avg = parseFloat(document.getElementById('avgRating').value);
+  const assessDate = document.getElementById('assessDate').value;
+  const unlockDate = frozen ? new Date(new Date(assessDate).getTime() + 30*24*60*60*1000).toISOString() : '';
+  const rec = {participantId:pid,pname:p.pname,department:p.department,title:p.title,
+    pre:parseFloat(pre.value),
+    post: frozen ? '' : parseFloat(post.value),
+    prePct:parseFloat(document.getElementById('prePct').value),
+    postPct: frozen ? '' : parseFloat(document.getElementById('postPct').value),
+    li: frozen ? '' : parseFloat(document.getElementById('li').value),
+    ratings,avgRating:avg,result:effectivenessLabel(avg),
+    assessDate, assessedBy:document.getElementById('assessedBy').value, ts:Date.now(),
+    lockEnabled: frozen, unlockDate};
+  const live = currentLive;
+  const res = live ? await apiUpdate('assessments', live.id, rec) : await apiAdd('assessments', rec);
+  btn.disabled = false; btn.textContent = oldText;
+  if(res && (live ? res.ok!==false : res.ok)){
+    if(live) Object.assign(live, rec); else assessments.push(Object.assign({id:res.id}, rec));
+    renderRecords(); drawProfile(); renderDash();
+    resetAssessForm();
+    showTab('records');
+    const frozenMsg = frozen ? 'Pre-Test score saved and frozen for '+p.pname+'. Use the Live Session tab after '+fmtDate(unlockDate)+' to upload the Post-Test score.' : '';
+    if(rec.result==='Insignificant') showNeedsTraining(p.pname,p.title,avg,frozenMsg);
+    else if(frozen) alert(frozenMsg);
+  } else {
+    alert('Could not save — check your internet connection and try again.');
+  }
+  saveCache();
+}
+
+function badge(res){
+  const cls = res==='Significant'?'b-good':res==='Insignificant'?'b-bad':'b-warn';
+  return `<span class="badge ${cls}">${res}</span>`;
+}
+function renderRecords(){
+  const head=['Name','Dept','Training','Assess Date','Pre','Post','LI %','Avg Rating','Result','Assessed By',''];
+  document.querySelector('#recTable thead').innerHTML='<tr>'+head.map(h=>`<th>${h}</th>`).join('')+'</tr>';
+  document.querySelector('#recTable tbody').innerHTML = assessments.map(r=>{
+    const isPending = r.post===''||r.post===undefined||r.post===null;
+    const postCell = isPending? '<span class="lockBadge">Pending</span>' : r.post;
+    const liCell = isPending? '—' : (r.li?.toFixed?.(1)??r.li);
+    return `<tr><td>${r.pname||''}</td><td>${r.department||''}</td><td>${r.title||''}</td><td>${r.assessDate||''}</td><td>${r.pre}</td><td>${postCell}</td><td>${liCell}</td><td>${numv(r.avgRating)>=0?r.avgRating:'—'}</td><td>${badge(r.result)}</td><td>${r.assessedBy||''}</td><td><button class="btn danger" onclick="delRecord('${r.id}')">Delete</button></td></tr>`;
+  }).join('') || `<tr><td colspan="11">No assessments submitted yet.</td></tr>`;
+}
+async function delRecord(id){
+  if(!confirm('Delete this assessment record?')) return;
+  await apiDelete('assessments', id);
+  assessments = assessments.filter(a=>String(a.id)!==String(id));
+  renderRecords(); fillProfileSel(); drawProfile(); renderDash(); saveCache();
+}
+async function exportExcel(){
+  const rows = assessments.map(r=>({Name:r.pname,Department:r.department,Training:r.title,'Assessment Date':r.assessDate,
+    'Pre-Test':r.pre,'Post-Test':r.post,'Pre-Test %':r.prePct,'Post-Test %':r.postPct,'Learning Index %':r.li,'Average Rating':r.avgRating,'Effectiveness Result':r.result,'Assessed By':r.assessedBy}));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Assessments');
+  const buf = XLSX.write(wb,{type:'array',bookType:'xlsx'});
+  const blob = new Blob([buf],{type:'application/octet-stream'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='Assessment_Records.xlsx';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+function fillProfileSel(){
+  const sel=document.getElementById('profileSel'); if(!sel) return; const cur=sel.value;
+  const ids = [...new Set(assessments.map(a=>a.participantId))];
+  sel.innerHTML = ids.map(id=>{ const a=assessments.find(x=>x.participantId===id); return `<option value="${id}">${a.pname} — ${a.title||'—'} (${a.department||''})</option>`; }).join('') || '<option value="">No assessments yet</option>';
+  if(cur && ids.includes(cur)) sel.value=cur;
+}
+function gaugeHTML(label,pct,color){
+  const p=Math.max(0,Math.min(100,pct));
+  return `<div class="gaugeCell"><div class="gauge" style="background:conic-gradient(${color} ${p*3.6}deg, var(--border) 0)"><b>${p.toFixed(0)}%</b></div><div class="gaugeLabel">${label}</div></div>`;
+}
+function drawProfile(){
+  const sel = document.getElementById('profileSel');
+  const statsBox = document.getElementById('profileStats');
+  const gaugeBox = document.getElementById('profileGauges');
+  if(!sel) return;
+  const pid = sel.value;
+  const list = assessments.filter(a=>a.participantId===pid);
+  const avg=(arr)=> arr.length? arr.reduce((a,b)=>a+b,0)/arr.length : 0;
+  const prePct=avgNum(list.map(a=>numv(a.pre,10))), postPct=avgNum(list.map(a=>numv(a.post,10)));
+  const li=avgNum(list.map(a=>numv(a.li))), rating=avgNum(list.map(a=>numv(a.avgRating)));
+  const hasRated=list.some(a=>numv(a.avgRating)>=0);
+  if(!list.length){
+    statsBox.innerHTML = '<p class="def">No assessments recorded for this participant yet.</p>';
+    gaugeBox.innerHTML=''; return;
+  }
+  statsBox.innerHTML = `
+    <div class="stat"><b>${rating.toFixed(2)}</b><span>Overall Rating (/5)</span></div>
+    <div class="stat"><b>${hasRated?effectivenessLabel(rating):'Pending'}</b><span>Overall Training Effectiveness</span></div>
+    <div class="stat"><b>${li.toFixed(1)}%</b><span>Overall Learning Index</span></div>`;
+  gaugeBox.innerHTML = gaugeHTML('Pre-Test',prePct,'#2f6fed') + gaugeHTML('Post-Test',postPct,'#17a673') + gaugeHTML('Learning Index',li,'#f5a524') + gaugeHTML('Rating',rating*20,'#7c5cff');
+  const enablerAvg = ENABLERS.map(e=>{
+    const vals = list.flatMap(a=>ratingsOf(a).filter(r=>r.name===e[0]).map(r=>r.value));
+    return {name:e[0], v: avg(vals)};
+  });
+  const colors=['#2f6fed','#17a673','#f5a524','#e5484d','#7c5cff','#0ea5b7'];
+
+  const lctx = document.getElementById('profileLearningChart');
+  if(profileLearningChart) profileLearningChart.destroy();
+  profileLearningChart = new Chart(lctx.getContext('2d'),{type:'bar',
+    data:{labels:['Pre-Test %','Post-Test %','Learning Index %'],
+      datasets:[{data:[prePct,postPct,li], backgroundColor:['#2f6fed','#17a673','#f5a524'],borderRadius:6}]},
+    options:{responsive:true,maintainAspectRatio:false,scales:{y:{min:0,max:100}},plugins:{legend:{display:false}}}});
+
+  const rctx = document.getElementById('profileRatingChart');
+  if(profileRatingChart) profileRatingChart.destroy();
+  profileRatingChart = new Chart(rctx.getContext('2d'),{type:'bar',
+    data:{labels:enablerAvg.map(e=>e.name), datasets:[{data:enablerAvg.map(e=>e.v), backgroundColor:colors, borderRadius:6}]},
+    options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{min:0,max:5}},plugins:{legend:{display:false}}}});
+}
+let profileLearningChart=null, profileRatingChart=null;
+
+
+
+function avgOf(arr){ return arr.length? arr.reduce((a,b)=>a+b,0)/arr.length : 0; }
+let ppChart=null, paramChart=null, unitChart=null;
+function renderDash(){
+  const n=assessments.length;
+  const rated = assessments.filter(a=>a.result&&a.result!=='Pending');
+  const sig = rated.filter(a=>a.result==='Significant').length;
+  const overall = rated.length? (sig/rated.length*100).toFixed(0)+'% Significant' : 'No data yet';
+  document.getElementById('statsBox').innerHTML = `
+    <div class="stat"><b>${participants.length}</b><span>Total Registered Participants</span></div>
+    <div class="stat"><b>${n}</b><span>Submitted Assessments</span></div>
+    <div class="stat"><b>${overall}</b><span>Overall Training Effectiveness</span></div>`;
+  if(typeof Chart==='undefined' || document.getElementById('view-dash').classList.contains('hidden')) return;
+
+  const trainingNames = [...new Set(assessments.map(a=>a.title).filter(Boolean))];
+  const trainingCaption = trainingNames.length? 'Training: ' + (trainingNames.length>3? trainingNames.slice(0,3).join(', ')+' +'+(trainingNames.length-3)+' more' : trainingNames.join(', ')) : 'No assessments yet';
+  ['capTrainings1','capTrainings2','capTrainings3'].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent = trainingCaption; });
+
+  // 1. Overall Pre vs Post (all participants) + improvement line
+  const withPost=assessments.filter(a=>numv(a.pre)>=0&&numv(a.post)>=0), withPre=assessments.filter(a=>numv(a.pre)>=0);
+  const hasPost=withPost.length>0, base=hasPost?withPost:withPre;
+  const preAvg=avgOf(base.map(a=>a.pre*10));
+  const postAvg=hasPost?avgOf(withPost.map(a=>a.post*10)):0;
+  const pts=postAvg-preAvg;
+  const pctChange=preAvg>0? pts/preAvg*100 : null;
+  const up=pts>=0;
+  const changeTxt=(up?'▲ +':'▼ ')+(pctChange!==null? pctChange.toFixed(1)+'%' : pts.toFixed(1)+' pts');
+  document.getElementById('ppBadge').innerHTML = !base.length? '<span class="def">No assessments yet.</span>' : !hasPost? `<span class="badge b-warn">Pre-test only</span> <span class="def">Pre ${preAvg.toFixed(1)}% (${base.length} participant${base.length>1?'s':''}) — post-test pending</span>` : `<span class="badge ${up?'b-good':'b-bad'}">${up?'Improvement':'Decrease'}: ${changeTxt}</span> <span class="def">Pre ${preAvg.toFixed(1)}% → Post ${postAvg.toFixed(1)}% (${up?'+':''}${pts.toFixed(1)} percentage points, ${base.length} assessment${base.length>1?'s':''})</span>`;
+  const labelPlugin={id:'ppLabels',afterDatasetsDraw(ch){
+    if(!base.length) return; const c=ch.ctx; c.save(); c.font='bold 13px system-ui'; c.textAlign='center';
+    const bars=ch.getDatasetMeta(0).data;
+    c.fillStyle=getComputedStyle(document.body).color;
+    bars.forEach((bar,i)=>{ c.fillText([preAvg,postAvg][i].toFixed(1)+'%',bar.x,bar.y+18); });
+    const mx=(bars[0].x+bars[1].x)/2, my=Math.min(bars[0].y,bars[1].y)-14;
+    c.fillStyle=up?'#17a673':'#e5484d'; c.font='bold 14px system-ui'; if(hasPost) c.fillText(changeTxt,mx,Math.max(my,14)); c.restore(); }};
+  if(ppChart) ppChart.destroy();
+  ppChart=new Chart(document.getElementById('dashPrePostChart').getContext('2d'),{
+    data:{labels:['Pre-Test','Post-Test'],datasets:[
+      {type:'bar',label:'Average %',data:[preAvg,postAvg],backgroundColor:['#2f6fed','#17a673'],borderRadius:8,barPercentage:.5},
+      {type:'line',label:'Improvement',data:[preAvg,postAvg],borderColor:'#f5a524',backgroundColor:'#f5a524',borderWidth:3,pointRadius:6}]},
+    options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:20}},scales:{y:{min:0,max:100,title:{display:true,text:'%'}}},plugins:{legend:{display:false}}},
+    plugins:[labelPlugin]});
+
+  // 2. Six assessment parameters - overall average
+  const pv=ENABLERS.map(e=>avgOf(assessments.flatMap(a=>ratingsOf(a).filter(r=>r.name===e[0]).map(r=>r.value))));
+  if(paramChart) paramChart.destroy();
+  paramChart=new Chart(document.getElementById('dashParamChart').getContext('2d'),{type:'bar',
+    data:{labels:ENABLERS.map(e=>e[0]),datasets:[{label:'Average Score',data:pv,backgroundColor:['#2f6fed','#17a673','#f5a524','#e5484d','#7c5cff','#0ea5b7'],borderRadius:6}]},
+    options:{responsive:true,maintainAspectRatio:false,scales:{y:{min:0,max:5}},plugins:{legend:{display:false}}}});
+
+  // 3. Unit-wise (units come from the IUs / GUs column of the uploaded Excel)
+  const unitOf=p=>((p&&p.ius)||'').toString().trim()||'Unassigned';
+  const units=[...new Set(participants.map(unitOf))].sort();
+  const count=units.map(u=>participants.filter(p=>unitOf(p)===u).length);
+  const score=units.map(u=>{
+    const vals=assessments.filter(a=>unitOf(participants.find(p=>p.id===a.participantId))===u).map(a=>numv(a.avgRating)).filter(v=>v>=0);
+    return vals.length? avgOf(vals):null;
+  });
+  document.getElementById('unitWrap').style.width = Math.max(units.length*90,300)+'px';
+  if(unitChart) unitChart.destroy();
+  unitChart=new Chart(document.getElementById('dashUnitChart').getContext('2d'),{
+    data:{labels:units,datasets:[
+      {type:'bar',label:'Participants',data:count,backgroundColor:'#2f6fed',borderRadius:6,yAxisID:'y'},
+      {type:'line',label:'Avg Assessment Score (/5)',data:score,borderColor:'#f5a524',backgroundColor:'#f5a524',borderWidth:3,pointRadius:5,yAxisID:'y1'}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      scales:{y:{beginAtZero:true,ticks:{precision:0},title:{display:true,text:'Participants'}},
+              y1:{position:'right',min:0,max:5,grid:{drawOnChartArea:false},title:{display:true,text:'Score (/5)'}}},
+      plugins:{legend:{position:'bottom'}}}});
+}
+if(typeof Chart==='undefined') document.getElementById('chartWarn').classList.remove('hidden');
+renderDash();
+
+// ===== Live Session: upload Post-Test scores to complete frozen records =====
+function fmtDate(d){ try{ return new Date(d).toLocaleDateString(); }catch(e){ return d||''; } }
+function esc(x){ return String(x==null?'':x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function numv(v,m){ return (v===''||v===null||v===undefined||isNaN(v))?NaN:Number(v)*(m||1); }
+function avgNum(arr){ const x=arr.filter(v=>!isNaN(v)); return x.length? x.reduce((a,b)=>a+b,0)/x.length : 0; }
+function ratingsOf(a){ return Array.isArray(a.ratings)? a.ratings : []; }
+function iso(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+const SAMPLE_TRAININGS=[
+ {t:'Safe Work Practices & PPE',o:-1,d:3,m:'Classroom',tr:'R. Sharma',loc:'Training Hall A',s:25},
+ {t:'Electrical Safety & LOTO',o:2,d:2,m:'Classroom',tr:'A. Verma',loc:'Training Hall B',s:20},
+ {t:'Fire Fighting & Emergency Response',o:5,d:1,m:'On-the-job',tr:'Plant Fire Dept.',loc:'Fire Station',s:30},
+ {t:'Preventive Maintenance Fundamentals',o:9,d:3,m:'Classroom',tr:'S. Iyer',loc:'Maintenance Bay',s:18},
+ {t:'5S & Housekeeping',o:14,d:1,m:'Virtual',tr:'M. Khan',loc:'Online (Teams)',s:40},
+ {t:'Confined Space Entry',o:20,d:2,m:'On-the-job',tr:'P. Nair',loc:'Unit 2 Site',s:15},
+ {t:'Machine Operation - CNC Basics',o:27,d:4,m:'Classroom',tr:'K. Reddy',loc:'Training Hall A',s:16}];
+function sampleSessions(){ const t0=new Date(); t0.setHours(0,0,0,0);
+  return SAMPLE_TRAININGS.map(x=>{ const f=new Date(t0); f.setDate(f.getDate()+x.o); const e=new Date(f); e.setDate(e.getDate()+x.d-1); return Object.assign({from:f,to:e},x); }); }
+let SESS=sampleSessions(), calMonth=new Date(); calMonth.setDate(1);
+function calMove(n){ calMonth.setMonth(calMonth.getMonth()+n); renderCalendar(); }
+function renderCalendar(){
+  const today=new Date(); today.setHours(0,0,0,0);
+  const y=calMonth.getFullYear(), m=calMonth.getMonth();
+  document.getElementById('calTitle').textContent=calMonth.toLocaleString(undefined,{month:'long',year:'numeric'});
+  const first=new Date(y,m,1).getDay(), days=new Date(y,m+1,0).getDate();
+  let h=['S','M','T','W','T','F','S'].map(d=>`<div class="calDow">${d}</div>`).join('');
+  for(let i=0;i<first;i++) h+='<div></div>';
+  for(let d=1;d<=days;d++){
+    const dt=new Date(y,m,d), hit=SESS.filter(x=>dt>=x.from&&dt<=x.to);
+    h+=`<div class="calDay${dt.getTime()===today.getTime()?' today':''}${hit.length?' ev':''}" title="${esc(hit.map(x=>x.t).join(', '))}">${d}${hit.length?'<i>&#9679;'+(hit.length>1?' '+hit.length:'')+'</i>':''}</div>`;
+  }
+  document.getElementById('calGrid').innerHTML=h;
+  const dayDiff=x=>Math.round((x-today)/864e5);
+  document.getElementById('calList').innerHTML=SESS.map((x,i)=>{
+    const live=today>=x.from&&today<=x.to, dd=dayDiff(x.from);
+    const status=live?'<span class="openBadge">In Progress</span>':`<span class="lockBadge">In ${dd} day${dd>1?'s':''}</span>`;
+    return `<div class="sessRow"><span><strong>${esc(x.t)}</strong><br><span class="def">${fmtDate(x.from)}${x.d>1?' – '+fmtDate(x.to):''} · ${esc(x.m)} · ${esc(x.tr)} · ${esc(x.loc)} · ${x.s} seats</span></span><span>${status} <button class="btn" type="button" onclick="useSession(${i})">Upload results</button></span></div>`;
+  }).join('');
+  const now=SESS.map((x,i)=>({x,i})).filter(o=>today>=o.x.from&&today<=o.x.to);
+  document.getElementById('liveNow').innerHTML=now.map(o=>`<div class="card liveNow"><p class="def" style="font-weight:600;margin:0 0 4px;color:var(--good);">● Live now</p><div class="sessRow" style="border:0;padding:0;"><span><strong>${esc(o.x.t)}</strong><br><span class="def">${esc(o.x.tr)} · ${esc(o.x.loc)}</span></span><button class="btn" type="button" onclick="useSession(${o.i})">Upload pre-test results</button></div></div>`).join('');
+}
+function useSession(i){
+  const x=SESS[i]; document.getElementById('liveType').value='pre';
+  document.getElementById('liveTraining').value=x.t; document.getElementById('liveDate').value=iso(x.from);
+  document.getElementById('liveTraining').scrollIntoView({behavior:'smooth',block:'center'});
+}
+function renderLive(){
+  const trainings=[...new Set(participants.map(p=>p.title).concat(SAMPLE_TRAININGS.map(x=>x.t)).filter(Boolean))];
+  const dl=document.getElementById('trainingList');
+  if(dl) dl.innerHTML=trainings.map(t=>`<option value="${esc(t)}">`).join('');
+  renderCalendar();
+}
+async function apiUpdate(type,id,data){
+  try{ const r = await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({type,action:'update',id,data})});
+    return await r.json(); }catch(e){ console.error(e); return {ok:false}; }
+}
+function parseScore(raw,totalField){
+  const t=String(raw).trim(), m=t.match(/^([\d.]+)\s*\/\s*([\d.]+)$/);
+  return m? {score:parseFloat(m[1]),total:parseFloat(m[2])} : {score:parseFloat(t),total:totalField};
+}
+async function uploadLiveResults(){
+  const btn=document.getElementById('uploadResultsBtn'); if(btn.disabled) return;
+  const type=document.getElementById('liveType').value;
+  const training=document.getElementById('liveTraining').value.trim();
+  const totalField=parseFloat(document.getElementById('liveTotalMarks').value);
+  const date=document.getElementById('liveDate').value||iso(new Date());
+  const f=document.getElementById('liveResultFile').files[0];
+  if(!training){ alert('Enter the Training title.'); return; }
+  if(!f){ alert('Choose a results Excel file first.'); return; }
+  btn.disabled=true; const oldText=btn.textContent; btn.textContent='Uploading…';
+  let done=0, created=0, skipped=0; const bannerRows=[];
+  try{
+    const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+    const ref=participants.find(p=>p.title===training), cs=SESS.find(x=>x.t===training);
+    const items=new Map();
+    for(const row of rows){
+      const name=String(pick(row,['name','employee / cwm name','employee name','full name'])||'').trim();
+      const sc=parseScore(pick(row,['score','total score','marks','total marks obtained']),totalField);
+      if(!name||isNaN(sc.score)||!sc.total){ if(name) skipped++; continue; }
+      const pct=Math.max(0,Math.min(100,sc.score/sc.total*100));
+      items.set(name.toLowerCase(),{row,name,pct,val:+(pct/10).toFixed(2)});
+    }
+    const list=[...items.values()]; let prog=0;
+    const tick=()=>{ btn.textContent='Uploading '+Math.min(++prog,list.length*(type==='pre'?2:1))+' / '+list.length*(type==='pre'?2:1)+'…'; };
+    if(type==='pre'){
+      // Phase 1: register missing participants (parallel)
+      await runPool(list, async it=>{
+        let p=participants.find(x=>x.title===training&&(x.pname||'').trim().toLowerCase()===it.name.toLowerCase());
+        if(!p){
+          const fromDate=(ref&&ref.fromDate)||(cs?iso(cs.from):date), toDate=(ref&&ref.toDate)||(cs?iso(cs.to):date), row=it.row;
+          const rec={title:training,mode:(ref&&ref.mode)||(cs&&cs.m)||'Classroom',fromDate,toDate,
+            duration:Math.round((new Date(toDate)-new Date(fromDate))/864e5+1)+' day(s)',trainer:(ref&&ref.trainer)||(cs&&cs.tr)||'',location:(ref&&ref.location)||(cs&&cs.loc)||'',
+            pname:it.name,pid:pick(row,['id no.','id no','id','employee id']),category:pick(row,['category']),department:pick(row,['department']),
+            ius:pick(row,['ius / gus','ius/gus','ius','unit','gus']),contractor:pick(row,['contractor for cwm','contractor']),ts:Date.now()};
+          const res=await apiAdd('participants',rec);
+          if(res&&res.ok){ p=Object.assign({id:res.id},rec); participants.push(p); created++; it.isNew=true; }
+        }
+        it.p=p||null; tick();
+      });
+      renderSearch(); fillAssessSel();
+      // Phase 2: pre-test records (parallel)
+      await runPool(list.filter(it=>it.p), async it=>{
+        const p=it.p, a=assessments.find(x=>x.participantId===p.id&&x.title===training);
+        if(a&&a.result!=='Pending'){ skipped++; tick(); return; }
+        if(a){ await apiUpdate('assessments',a.id,{pre:it.val,prePct:it.pct}); a.pre=it.val; a.prePct=it.pct; }
+        else{
+          const rec={participantId:p.id,pname:p.pname,department:p.department||'',title:training,pre:it.val,post:'',prePct:it.pct,postPct:'',li:'',
+            ratings:[],avgRating:'',result:'Pending',assessDate:date,assessedBy:'Live Session',ts:Date.now(),lockEnabled:true,
+            unlockDate:new Date(new Date(date).getTime()+30*864e5).toISOString()};
+          const res=await apiAdd('assessments',rec);
+          if(!res||!res.ok){ skipped++; tick(); return; }
+          assessments.push(Object.assign({id:res.id},rec));
+        }
+        bannerRows.push(`<div class="resultRow"><span>${esc(it.name)} — ${esc(training)}: Pre-Test ${it.val}/10 (${it.pct.toFixed(0)}%)${it.isNew?' · new participant added':''}</span><strong>Added to Assessment</strong></div>`);
+        done++; tick();
+      });
+      skipped+=list.filter(it=>!it.p).length;
+    } else {
+      await runPool(list, async it=>{
+        const p=participants.find(x=>x.title===training&&(x.pname||'').trim().toLowerCase()===it.name.toLowerCase());
+        const a=p&&assessments.find(x=>x.participantId===p.id&&x.title===training&&!(numv(x.post)>=0));
+        if(!a){ skipped++; tick(); return; }
+        const prePct=numv(a.prePct)>=0?numv(a.prePct):numv(a.pre,10);
+        const li=prePct>=100?(it.pct>=100?100:0):Math.max(0,Math.min(100,((it.pct-prePct)/(100-prePct))*100));
+        await apiUpdate('assessments',a.id,{post:it.val,postPct:it.pct,li});
+        a.post=it.val; a.postPct=it.pct; a.li=li;
+        bannerRows.push(`<div class="resultRow ${li<=50?'need':''}"><span>${esc(it.name)} — ${esc(training)}: Learning Index ${li.toFixed(1)}%</span><strong>${li<=50?'Needs Improvement':'Good Improvement'}</strong></div>`);
+        done++; tick();
+      });
+    }
+  }catch(e){ console.error(e); alert('Could not read the file. Please upload a valid Excel file.'); }
+  btn.disabled=false; btn.textContent=oldText;
+  document.getElementById('resultMsg').textContent=type==='pre'
+    ? done+' pre-test score(s) saved, '+created+' new participant(s) added to Search, '+skipped+' skipped.'
+    : done+' post-test score(s) completed, '+skipped+' skipped (no pending record with that name for this training).';
+  document.getElementById('liveResultFile').value='';
+  document.getElementById('liveBanner').innerHTML=bannerRows.length?'<div class="card"><p class="def" style="font-weight:600;margin-bottom:6px;">'+(type==='pre'?'Pre-Test Results':'Post-Test Results — Learning Index')+'</p>'+bannerRows.join('')+'</div>':'';
+  renderAllViews(); renderLive(); saveCache();
+}
+</script>
+
+</body>
+</html>
