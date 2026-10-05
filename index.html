@@ -3,7 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Post-Training Effectiveness Dashboard</title>
+<title>Serverless Training Effectiveness Tracker</title>
+<meta property="og:title" content="Serverless Training Effectiveness Tracker">
+<meta property="og:description" content="Central L&amp;D — register participants, record pre/post assessments and track training effectiveness.">
+<meta name="description" content="Central L&amp;D — register participants, record pre/post assessments and track training effectiveness.">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -101,7 +104,7 @@ details.fold details.fold>summary .cnt{background:var(--violet);}
 </head>
 <body>
 <div id="trainModal" class="modalBack hidden"><div class="modalBox"><h2>⚠ Needs Training</h2><p id="trainModalMsg"></p><p class="def" id="trainModalNote"></p><button class="btn" type="button" onclick="closeTrainModal()">OK</button></div></div>
-<div class="hero"><div class="wrap" style="padding:0;"><span>CENTRAL L&amp;D</span><h1>Post-Training Effectiveness Dashboard</h1></div></div>
+<div class="hero"><div class="wrap" style="padding:0;"><span>CENTRAL L&amp;D</span><h1>Serverless Training Effectiveness Tracker</h1></div></div>
 <div class="wrap">
 <div id="chartWarn" class="card hidden" style="color:var(--bad);font-size:.8rem;">Charts library could not load. Please refresh; if it persists, check network access to cdn.jsdelivr.net.</div>
 <div class="syncPill" style="cursor:pointer;" title="Click to sync now" onclick="refreshAll(true)"><span class="syncDot pulse" id="syncDot"></span><span id="syncStatus">Loading data…</span></div>
