@@ -132,7 +132,7 @@ th{color:var(--muted);font-weight:600;}
     </fieldset>
     <fieldset>
       <legend>Bulk Upload Participants (Excel)</legend>
-      <p class="def">Upload an .xlsx with columns: Employee/CWM Name, ID No., Category, Department, IUs/GUs, Contractor for CWM. Fill Training Details above first — it applies to every uploaded row.</p>
+      <p class="def">Upload an .xlsx with participant columns (Name, ID No., Category, Department, IUs/GUs, Contractor). If your file also has its own Training Topic / From Date / To Date / Venue / Trainer columns, those are used per row automatically — otherwise the Training Details filled in above apply to every row. Multiple sheets in one file are all read; a title/banner row above your real headers is detected and skipped automatically.</p>
       <input type="file" id="bulkFile" accept=".xlsx,.xls">
       <button type="button" class="btn sec" id="bulkUploadBtn" onclick="bulkUpload()">Upload & Add All</button>
       <div id="bulkMsg" class="def"></div>
@@ -365,23 +365,70 @@ async function submitParticipant(ev){
 
 function normKey(k){ return (k||'').toString().replace(/\s+/g,'').toLowerCase(); }
 function pick(row,names){ const nn=names.map(normKey); for(const k in row){ if(nn.includes(normKey(k))) return row[k]; } return ''; }
+function pickFuzzy(row,contains){ for(const k in row){ const nk=normKey(k); if(contains.some(c=>nk.indexOf(c)>-1)) return row[k]; } return ''; }
+function findHeaderRow(ws){
+  const raw = XLSX.utils.sheet_to_json(ws,{header:1,defval:'',blankrows:false});
+  for(let i=0;i<Math.min(10,raw.length);i++){
+    const vals = raw[i].map(v=>normKey(v));
+    if(vals.some(v=>v.indexOf('name')>-1)) return i;
+  }
+  return 0;
+}
+function toDateStr(v){
+  if(v instanceof Date && !isNaN(v)) return v.toISOString().slice(0,10);
+  return v||'';
+}
 async function bulkUpload(){
   const btn = document.getElementById('bulkUploadBtn');
   if(btn.disabled) return;
   const f = document.getElementById('bulkFile').files[0];
   if(!f){ alert('Choose an Excel file first.'); return; }
-  if(!title.value||!fromDate.value||!toDate.value){ alert('Fill Training Details above first.'); return; }
   btn.disabled = true; const oldText = btn.textContent;
   const buf = await f.arrayBuffer();
-  const wb = XLSX.read(buf,{type:'array'});
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-  const recs=rows.map(row=>({title:title.value,mode:mode.value,fromDate:fromDate.value,toDate:toDate.value,duration:duration.value,trainer:trainer.value,location:location.value,
-      pname:pick(row,['employee / cwm name','name','employee name']),
-      pid:pick(row,['id no.','id no','id']),
-      category:pick(row,['category']),
-      department:pick(row,['department','department ']),
-      ius:pick(row,['ius / gus','ius/gus','ius','unit','gus']),
-      contractor:pick(row,['contractor for cwm','contractor']), ts:Date.now()})).filter(r=>r.pname);
+  const wb = XLSX.read(buf,{type:'array', cellDates:true});
+  const nameOf = row => pick(row,['employee / cwm name','name','employee name','full name','participant name','cwm name'])
+      || pickFuzzy(row,['name']);
+
+  let allRows=[];
+  wb.SheetNames.forEach(sn=>{
+    const ws = wb.Sheets[sn];
+    const headerRow = findHeaderRow(ws);
+    allRows = allRows.concat(XLSX.utils.sheet_to_json(ws,{range:headerRow, defval:''}));
+  });
+
+  const allRecs = allRows.map(row=>{
+    const rowTitle = pick(row,['training topic','training title','title']);
+    const rowFrom = pick(row,['from date']);
+    const rowTo = pick(row,['to date']);
+    const rowTrainer = pick(row,['trainer']) || pickFuzzy(row,['faculty']);
+    const rowVenue = pick(row,['venue','location']);
+    const rowDuration = pick(row,['duration']) || pickFuzzy(row,['mandays']);
+    return {
+      title: rowTitle || title.value,
+      mode: mode.value,
+      fromDate: rowFrom ? toDateStr(rowFrom) : fromDate.value,
+      toDate: rowTo ? toDateStr(rowTo) : toDate.value,
+      duration: rowDuration || duration.value,
+      trainer: rowTrainer || trainer.value,
+      location: rowVenue || location.value,
+      pname: nameOf(row),
+      pid: pick(row,['id no.','id no','id']) || pickFuzzy(row,['id']),
+      category: pick(row,['category']) || pickFuzzy(row,['category']),
+      department: pick(row,['department','department ']) || pickFuzzy(row,['dept','department']),
+      ius: pick(row,['ius / gus','ius/gus','ius','unit','gus']) || pickFuzzy(row,['unit','ius','gus']),
+      contractor: pick(row,['contractor for cwm','contractor']) || pickFuzzy(row,['contractor','contactor']),
+      ts: Date.now()
+    };
+  });
+  const recs = allRecs.filter(r=>r.pname);
+  if(allRows.length && recs.length===0){
+    btn.disabled = false; btn.textContent = oldText;
+    const headers = allRows[0] ? Object.keys(allRows[0]) : [];
+    document.getElementById('bulkMsg').innerHTML = '0 participant(s) added — couldn\'t find a Name column. '
+      + 'Detected column headers: <strong>' + headers.join(', ') + '</strong>. '
+      + 'Rename one of them to "Name" (or "Employee Name") and try again.';
+    return;
+  }
   let n=0, failed=0, doneCount=0;
   await runPool(recs, async rec=>{
     const res=await apiAdd('participants', rec);
@@ -390,7 +437,7 @@ async function bulkUpload(){
   });
   btn.disabled = false; btn.textContent = oldText;
   document.getElementById('bulkFile').value = '';
-  document.getElementById('bulkMsg').textContent = n+' participant(s) added'+(failed?', '+failed+' failed':'')+'.';
+  document.getElementById('bulkMsg').textContent = n+' participant(s) added'+(failed?', '+failed+' failed':'')+(allRows.length>recs.length? ', '+(allRows.length-recs.length)+' skipped (no name found)':'')+'.';
   fillAssessSel(); renderSearch(); fillProfileSel(); renderDash(); saveCache();
 }
 
