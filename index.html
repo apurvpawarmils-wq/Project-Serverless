@@ -42,6 +42,16 @@ th,td{border-bottom:1px solid var(--border);padding:5px 4px;text-align:left;whit
 th{color:var(--muted);font-weight:600;}
 .tablewrap{overflow-x:auto;}
 .hidden{display:none;}
+details.fold{border:1px solid var(--border);border-radius:10px;margin:8px 0;background:var(--card);}
+details.fold>summary{cursor:pointer;padding:10px 12px;font-size:.85rem;font-weight:600;list-style:none;display:flex;align-items:center;gap:8px;}
+details.fold>summary::-webkit-details-marker{display:none;}
+details.fold>summary::before{content:"▸";color:var(--accent);transition:transform .15s;display:inline-block;}
+details.fold[open]>summary::before{transform:rotate(90deg);}
+details.fold>summary .cnt{font-weight:600;font-size:.7rem;color:#fff;background:var(--accent);border-radius:12px;padding:2px 9px;margin-left:auto;}
+details.fold .foldBody{padding:0 12px 8px;}
+details.fold details.fold{margin:6px 0;background:var(--bg);}
+details.fold details.fold>summary{font-size:.8rem;}
+details.fold details.fold>summary .cnt{background:var(--violet);}
 .def{font-size:.68rem;color:var(--muted);margin:0 0 4px;}
 .badge{display:inline-block;border-radius:14px;padding:2px 9px;font-size:.72rem;font-weight:600;color:#fff;}
 .b-good{background:var(--good);} .b-warn{background:var(--warn);} .b-bad{background:var(--bad);}
@@ -145,8 +155,9 @@ th{color:var(--muted);font-weight:600;}
 <!-- SEARCH -->
 <div id="view-search" class="hidden">
   <div class="card">
-    <label>Search registered participants (name, ID, department, training)</label>
+    <label>Search registered participants (name, ID, department, unit, training)</label>
     <input id="searchBox" oninput="renderSearch()" placeholder="Type to search...">
+    <div style="margin-top:8px;"><button class="btn sec" type="button" style="margin-top:0;padding:5px 12px;font-size:.75rem;" onclick="foldAll(true)">Expand all</button><button class="btn sec" type="button" style="margin-top:0;padding:5px 12px;font-size:.75rem;" onclick="foldAll(false)">Collapse all</button></div>
     <div id="searchResults" style="margin-top:8px;"></div>
   </div>
 </div>
@@ -156,7 +167,9 @@ th{color:var(--muted);font-weight:600;}
   <form class="card" id="assessForm" onsubmit="return submitAssessment(event)">
     <fieldset>
       <legend>Select Participant</legend>
-      <select id="assessPart" onchange="loadParticipant()"></select>
+      <input id="assessSearch" type="search" placeholder="Search by name, ID, department or training…" oninput="filterAssessSel(true)" autocomplete="off">
+      <select id="assessPart" onchange="loadParticipant()" style="margin-top:6px;"></select>
+      <div class="def" id="assessCount" style="margin-top:4px;"></div>
       <div class="def" id="partInfo"></div>
     </fieldset>
     <fieldset>
@@ -448,21 +461,52 @@ async function bulkUpload(){
   fillAssessSel(); renderSearch(); fillProfileSel(); renderDash(); saveCache();
 }
 
+const openFolders=new Set();
+function folderToggle(el){ const k=el.dataset.k; if(el.open) openFolders.add(k); else openFolders.delete(k); }
+function foldAll(open){
+  document.querySelectorAll('#searchResults details.fold').forEach(d=>{ d.open=open; folderToggle(d); });
+}
 function renderSearch(){
-  const q = (document.getElementById('searchBox')?.value||'').toLowerCase();
-  const list = participants.filter(p=>!q || [p.pname,p.pid,p.department,p.title].join(' ').toLowerCase().includes(q));
-  document.getElementById('searchResults').innerHTML = list.map(p=>
-    `<div class="searchRow"><span>${esc(p.pname)} — ${esc(p.department||'')} — ${esc(p.title||'')}${preTag(p)}</span>
-     <button class="btn" style="margin:0;padding:5px 10px;" onclick="goAssess('${p.id}')">Assess</button></div>`
-  ).join('') || '<p class="def">No participants found.</p>';
+  const q = (document.getElementById('searchBox')?.value||'').trim().toLowerCase();
+  const list = participants.filter(p=>!q || [p.pname,p.pid,p.department,p.title,p.ius,p.category].join(' ').toLowerCase().includes(q));
+  const out=document.getElementById('searchResults');
+  if(!list.length){ out.innerHTML='<p class="def">No participants found.</p>'; return; }
+  // group: Training -> Unit
+  const tree=new Map();
+  list.forEach(p=>{
+    const t=String(p.title||'').trim()||'(No training title)', u=String(p.ius||'').trim()||'(No unit)';
+    if(!tree.has(t)) tree.set(t,new Map());
+    const m=tree.get(t); if(!m.has(u)) m.set(u,[]); m.get(u).push(p);
+  });
+  const byName=(a,b)=>a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'});
+  const row=p=>`<div class="searchRow"><span>${esc(p.pname)}${p.pid?' ['+esc(p.pid)+']':''} — ${esc(p.department||'')}${preTag(p)}</span>
+     <button class="btn" style="margin:0;padding:5px 10px;" onclick="goAssess('${esc(p.id)}')">Assess</button></div>`;
+  out.innerHTML=[...tree.keys()].sort(byName).map(t=>{
+    const units=tree.get(t); let total=0; units.forEach(a=>total+=a.length);
+    const tk='T::'+t, isOpenT=q||openFolders.has(tk);
+    const inner=[...units.keys()].sort(byName).map(u=>{
+      const arr=units.get(u).slice().sort((a,b)=>byName(String(a.pname||''),String(b.pname||''))), uk='U::'+t+'::'+u;
+      return `<details class="fold" data-k="${esc(uk)}" ontoggle="folderToggle(this)" ${(q||openFolders.has(uk))?'open':''}><summary>📁 ${esc(u)}<span class="cnt">${arr.length}</span></summary><div class="foldBody">${arr.map(row).join('')}</div></details>`;
+    }).join('');
+    return `<details class="fold" data-k="${esc(tk)}" ontoggle="folderToggle(this)" ${isOpenT?'open':''}><summary>📂 ${esc(t)}<span class="cnt">${total}</span></summary><div class="foldBody">${inner}</div></details>`;
+  }).join('');
 }
 function preTag(p){ const a=assessments.find(x=>x.participantId===p.id); return a&&numv(a.pre)>=0?` <span class="openBadge">Pre ${a.pre}/10</span>`:''; }
-function goAssess(id){ showTab('assess'); document.getElementById('assessPart').value=id; loadParticipant(); }
+function goAssess(id){ showTab('assess'); const sb=document.getElementById('assessSearch'); if(sb) sb.value=''; fillAssessSel(); document.getElementById('assessPart').value=id; loadParticipant(); }
 
-function fillAssessSel(){
+function fillAssessSel(){ filterAssessSel(false); }
+function filterAssessSel(typed){
   const sel=document.getElementById('assessPart'); const cur=sel.value;
-  sel.innerHTML = '<option value="">-- select --</option>'+participants.map(p=>`<option value="${p.id}">${p.pname} (${p.title||''})</option>`).join('');
-  if(cur) sel.value=cur;
+  const box=document.getElementById('assessSearch');
+  const q=(box?box.value:'').trim().toLowerCase();
+  const match=p=>!q||[p.pname,p.pid,p.department,p.title,p.category,p.ius].some(v=>String(v||'').toLowerCase().includes(q));
+  const list=participants.filter(p=>match(p)||p.id===cur);
+  sel.innerHTML = '<option value="">-- select --</option>'+list.map(p=>`<option value="${esc(p.id)}">${esc(p.pname)}${p.pid?' ['+esc(p.pid)+']':''} (${esc(p.title||'')})</option>`).join('');
+  if(cur&&list.some(p=>p.id===cur)) sel.value=cur;
+  const n=participants.filter(match).length;
+  const cnt=document.getElementById('assessCount');
+  if(cnt) cnt.textContent=q? (n? n+' match'+(n>1?'es':'')+' found' : 'No participants found') : '';
+  if(typed&&q&&n===1){ const only=participants.find(match); if(sel.value!==only.id){ sel.value=only.id; loadParticipant(); } }
 }
 let currentLive=null;
 function loadParticipant(){
@@ -523,7 +567,7 @@ function showNeedsTraining(name,title,avg,extra){
   document.getElementById('trainModal').classList.remove('hidden');
 }
 function closeTrainModal(){ document.getElementById('trainModal').classList.add('hidden'); }
-function resetAssessForm(){ document.getElementById('assessForm').reset(); currentLive=null; document.getElementById('pre').readOnly=false; document.getElementById('post').readOnly=false; document.getElementById('partInfo').textContent=''; toggleFreeze(); }
+function resetAssessForm(){ document.getElementById('assessForm').reset(); currentLive=null; document.getElementById('pre').readOnly=false; document.getElementById('post').readOnly=false; document.getElementById('partInfo').textContent=''; const sb=document.getElementById('assessSearch'); if(sb) sb.value=''; fillAssessSel(); toggleFreeze(); }
 
 async function submitAssessment(ev){
   ev.preventDefault();
