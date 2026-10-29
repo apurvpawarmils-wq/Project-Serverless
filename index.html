@@ -154,6 +154,17 @@ details.fold details.fold>summary .cnt{background:var(--violet);}
       <button type="button" class="btn" id="bulkUploadBtn" onclick="bulkUpload()">Upload & Add All</button>
       <div id="bulkMsg" class="def"></div>
     </fieldset>
+    <fieldset id="regDelBox" style="display:none;">
+      <legend>Delete Participants (Admin)</legend>
+      <p class="def">Removes participants who have <b>no assessment yet</b> — anyone already assessed is never removed here. Pick filters to remove only part of the list (for example one training or one unit).</p>
+      <div class="grid">
+        <div><label>Training</label><select id="rd_training" onchange="regDelInfo()"></select></div>
+        <div><label>Unit (IUs / GUs)</label><select id="rd_ius" onchange="regDelInfo()"></select></div>
+        <div><label>Department</label><select id="rd_dept" onchange="regDelInfo()"></select></div>
+      </div>
+      <div class="def" id="rdInfo" style="margin-top:6px;"></div>
+      <button type="button" class="btn danger" id="rdBtn" onclick="regDeleteMatching()" style="padding:8px 14px;font-size:.82rem;">Remove these participants</button>
+    </fieldset>
   </form>
 </div>
 
@@ -163,6 +174,12 @@ details.fold details.fold>summary .cnt{background:var(--violet);}
     <label>Search registered participants (name, ID, department, unit, training)</label>
     <input id="searchBox" oninput="renderSearch()" placeholder="Type to search...">
     <div style="margin-top:8px;"><button class="btn sec" type="button" style="margin-top:0;padding:5px 12px;font-size:.75rem;" onclick="foldAll(true)">Expand all</button><button class="btn sec" type="button" style="margin-top:0;padding:5px 12px;font-size:.75rem;" onclick="foldAll(false)">Collapse all</button></div>
+    <div id="seaBar" style="display:none;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;">
+      <span class="def" id="seaSelCount"></span>
+      <button class="btn sec" type="button" style="margin:0;padding:5px 12px;font-size:.75rem;" onclick="seaSelectAll(true)">Select all shown</button>
+      <button class="btn sec" type="button" style="margin:0;padding:5px 12px;font-size:.75rem;" onclick="seaSelectAll(false)">Clear</button>
+      <button class="btn danger" type="button" id="seaDelBtn" style="padding:6px 12px;font-size:.78rem;" onclick="seaDeleteSelected()">Delete selected</button>
+    </div>
     <div id="searchResults" style="margin-top:8px;"></div>
   </div>
 </div>
@@ -223,6 +240,7 @@ details.fold details.fold>summary .cnt{background:var(--violet);}
     <datalist id="trainingList"></datalist>
     <button class="btn" type="button" id="uploadResultsBtn" onclick="uploadLiveResults()">Upload Results</button>
     <div id="resultMsg" class="def" style="margin-top:6px;"></div>
+    <div id="liveDelBox" style="display:none;margin-top:10px;"><button type="button" class="btn danger" onclick="liveDeletePending()" style="padding:6px 12px;font-size:.78rem;">Delete uploaded Pre-Test results (still pending) for the training above</button><div class="def">Admin only. Participants stay registered; only their pending assessment records are removed.</div></div>
   </div>
   <div id="liveBanner"></div>
   <div class="card">
@@ -262,6 +280,13 @@ details.fold details.fold>summary .cnt{background:var(--violet);}
 <div id="view-records" class="hidden">
   <div class="card">
     <button class="btn" onclick="exportExcel()">Export to Excel</button>
+    <div id="recBar" style="display:none;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0;">
+      <select id="recFilter" onchange="recFilterChange(this.value)" style="width:auto;max-width:260px;"></select>
+      <span class="def" id="recSelCount"></span>
+      <button class="btn sec" type="button" style="margin:0;padding:5px 12px;font-size:.75rem;" onclick="recSelectAll(true)">Select all shown</button>
+      <button class="btn sec" type="button" style="margin:0;padding:5px 12px;font-size:.75rem;" onclick="recSelectAll(false)">Clear</button>
+      <button class="btn danger" type="button" id="recDelBtn" style="padding:6px 12px;font-size:.78rem;" onclick="recDeleteSelected()">Delete selected</button>
+    </div>
     <div class="tablewrap"><table id="recTable"><thead></thead><tbody></tbody></table></div>
   </div>
 </div>
@@ -584,6 +609,7 @@ function foldAll(open){
 function renderSearch(){
   const q = (document.getElementById('searchBox')?.value||'').trim().toLowerCase();
   const list = participants.filter(p=>!q || [p.pname,p.pid,p.department,p.title,p.ius,p.category].join(' ').toLowerCase().includes(q));
+  window.__seaList=list; renderSeaBar();
   const out=document.getElementById('searchResults');
   if(!list.length){ out.innerHTML='<p class="def">No participants found.</p>'; return; }
   // group: Training -> Unit
@@ -594,7 +620,7 @@ function renderSearch(){
     const m=tree.get(t); if(!m.has(u)) m.set(u,[]); m.get(u).push(p);
   });
   const byName=(a,b)=>a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'});
-  const row=p=>`<div class="searchRow"><span>${esc(p.pname)}${p.pid?' ['+esc(p.pid)+']':''} — ${esc(p.department||'')}${preTag(p)}</span>
+  const row=p=>`<div class="searchRow"><span>${isAdmin?`<input type="checkbox" style="width:auto;margin-right:6px;" ${SEL.sea.has(String(p.id))?'checked':''} onchange="seaToggle('${esc(p.id)}',this.checked)">`:''}${esc(p.pname)}${p.pid?' ['+esc(p.pid)+']':''} — ${esc(p.department||'')}${preTag(p)}</span>
      <button class="btn" style="margin:0;padding:5px 10px;" onclick="goAssess('${esc(p.id)}')">Assess</button></div>`;
   out.innerHTML=[...tree.keys()].sort(byName).map(t=>{
     const units=tree.get(t); let total=0; units.forEach(a=>total+=a.length);
@@ -742,13 +768,17 @@ function badge(res){
 }
 function renderRecords(){
   const head=['Name','Dept','Training','Assess Date','Pre','Post','LI %','Avg Rating','Result','Assessed By',''];
-  document.querySelector('#recTable thead').innerHTML='<tr>'+head.map(h=>`<th>${h}</th>`).join('')+'</tr>';
-  document.querySelector('#recTable tbody').innerHTML = assessments.map(r=>{
+  const exist=new Set(assessments.map(a=>String(a.id))); SEL.rec.forEach(x=>{ if(!exist.has(x)) SEL.rec.delete(x); });
+  const list=assessments.filter(r=>!recFilter||r.title===recFilter);
+  document.querySelector('#recTable thead').innerHTML='<tr>'+(isAdmin?'<th></th>':'')+head.map(h=>`<th>${h}</th>`).join('')+'</tr>';
+  document.querySelector('#recTable tbody').innerHTML = list.map(r=>{
     const isPending = r.post===''||r.post===undefined||r.post===null;
     const postCell = isPending? '<span class="lockBadge">Pending</span>' : r.post;
     const liCell = isPending? '—' : (r.li?.toFixed?.(1)??r.li);
-    return `<tr><td>${r.pname||''}</td><td>${r.department||''}</td><td>${r.title||''}</td><td>${r.assessDate||''}</td><td>${r.pre}</td><td>${postCell}</td><td>${liCell}</td><td>${numv(r.avgRating)>=0?r.avgRating:'—'}</td><td>${badge(r.result)}</td><td>${r.assessedBy||''}</td><td><button class="btn danger" onclick="delRecord('${r.id}')">Delete</button></td></tr>`;
-  }).join('') || `<tr><td colspan="11">No assessments submitted yet.</td></tr>`;
+    const chk = isAdmin? `<td><input type="checkbox" style="width:auto;" ${SEL.rec.has(String(r.id))?'checked':''} onchange="recToggle('${r.id}',this.checked)"></td>` : '';
+    return `<tr>${chk}<td>${r.pname||''}</td><td>${r.department||''}</td><td>${r.title||''}</td><td>${r.assessDate||''}</td><td>${r.pre}</td><td>${postCell}</td><td>${liCell}</td><td>${numv(r.avgRating)>=0?r.avgRating:'—'}</td><td>${badge(r.result)}</td><td>${r.assessedBy||''}</td><td><button class="btn danger" onclick="delRecord('${r.id}')">Delete</button></td></tr>`;
+  }).join('') || `<tr><td colspan="12">No assessments submitted yet.</td></tr>`;
+  renderRecBar();
 }
 async function delRecord(id){
   if(!confirm('Delete this assessment record?')) return;
@@ -1041,7 +1071,11 @@ function applyAdminUI(){
   const b=document.getElementById('adminBtn'); if(b) b.textContent=isAdmin?'🔓 Admin — log out':'🔑 Admin login';
   const fl=document.getElementById('freezeLabel'); if(fl) fl.style.display=isAdmin?'flex':'none';
   const ca=document.getElementById('calAdmin'); if(ca) ca.classList.toggle('hidden',!isAdmin);
-  renderCalAdmin(); updateCalNote();
+  if(!isAdmin){ recFilter=''; SEL.rec.clear(); SEL.sea.clear(); }
+  const rd=document.getElementById('regDelBox'); if(rd) rd.style.display=isAdmin?'':'none';
+  const ld=document.getElementById('liveDelBox'); if(ld) ld.style.display=isAdmin?'':'none';
+  renderCalAdmin(); updateCalNote(); regDelFill();
+  try{ renderCurrent(); }catch(e){}
 }
 function adminBtnClick(){ if(isAdmin) adminLogout(); else { document.getElementById('pw_input').value=''; document.getElementById('pw_err').textContent=''; document.getElementById('pwModal').classList.remove('hidden'); document.getElementById('pw_input').focus(); } }
 function closePw(){ document.getElementById('pwModal').classList.add('hidden'); }
@@ -1154,6 +1188,88 @@ function downloadCalTemplate(){
   const url=URL.createObjectURL(new Blob([XLSX.write(wb,{type:'array',bookType:'xlsx'})],{type:'application/octet-stream'}));
   const a=document.createElement('a'); a.href=url; a.download='Training_Calendar_Template.xlsx'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
+// ===== Multi-select delete: Total Records · Search · Register · Live Session (admin only) =====
+const SEL={rec:new Set(), sea:new Set()}; let recFilter='';
+async function bulkRemove(type,ids){
+  // removes the given ids on the server (admin password is attached by postJSON) and from this page; returns true when done
+  syncPaused++; let ok=true;
+  try{
+    for(let i=0;i<ids.length;i+=500){
+      const chunk=ids.slice(i,i+500); chunk.forEach(id=>localDeletes.set(type+':'+id,Date.now()));
+      const res=await postJSON({type,action:'deleteMany',ids:chunk},true);
+      if(!res||!res.ok){ ok=false; chunk.forEach(id=>localDeletes.delete(type+':'+id));
+        if(res&&(res.error==='unauthorized'||res.error==='admin not set')) adminLost(); else alert('Could not delete — '+((res&&res.error)||'check your connection')+'. Nothing more was removed.'); break; }
+      const gone=new Set(chunk.map(String));
+      if(type==='assessments') assessments=assessments.filter(a=>!gone.has(String(a.id))); else participants=participants.filter(x=>!gone.has(String(x.id)));
+    }
+  } finally { syncPaused--; saveCache(); scheduleSync(); }
+  return ok;
+}
+function hasAssess(p){ return assessments.some(a=>String(a.participantId)===String(p.id)); }
+// ---- Total Records
+function renderRecBar(){
+  const bar=document.getElementById('recBar'); if(!bar) return; bar.style.display=isAdmin?'flex':'none'; if(!isAdmin) return;
+  const sel=document.getElementById('recFilter'), titles=[...new Set(assessments.map(a=>a.title).filter(Boolean))].sort();
+  if(recFilter&&!titles.includes(recFilter)) recFilter='';
+  sel.innerHTML='<option value="">All trainings</option>'+titles.map(t=>`<option value="${esc(t)}"${t===recFilter?' selected':''}>${esc(t)}</option>`).join('');
+  document.getElementById('recSelCount').textContent=SEL.rec.size+' selected';
+  document.getElementById('recDelBtn').disabled=!SEL.rec.size;
+}
+function recFilterChange(v){ recFilter=v; renderRecords(); }
+function recToggle(id,on){ on?SEL.rec.add(String(id)):SEL.rec.delete(String(id)); renderRecBar(); }
+function recSelectAll(on){ assessments.filter(r=>!recFilter||r.title===recFilter).forEach(r=>on?SEL.rec.add(String(r.id)):SEL.rec.delete(String(r.id))); renderRecords(); }
+async function recDeleteSelected(){
+  const ids=[...SEL.rec]; if(!ids.length) return;
+  if(!confirm('Delete '+ids.length+' assessment record(s)?\n\nThis cannot be undone.')) return;
+  if(await bulkRemove('assessments',ids)) SEL.rec.clear();
+  renderRecords(); fillProfileSel(); drawProfile(); renderDash();
+}
+// ---- Search
+function renderSeaBar(){
+  const bar=document.getElementById('seaBar'); if(!bar) return; bar.style.display=isAdmin?'flex':'none'; if(!isAdmin) return;
+  const exist=new Set(participants.map(p=>String(p.id))); SEL.sea.forEach(x=>{ if(!exist.has(x)) SEL.sea.delete(x); });
+  document.getElementById('seaSelCount').textContent=SEL.sea.size+' selected';
+  document.getElementById('seaDelBtn').disabled=!SEL.sea.size;
+}
+function seaToggle(id,on){ on?SEL.sea.add(String(id)):SEL.sea.delete(String(id)); renderSeaBar(); }
+function seaSelectAll(on){ (window.__seaList||[]).forEach(p=>on?SEL.sea.add(String(p.id)):SEL.sea.delete(String(p.id))); renderSearch(); }
+async function seaDeleteSelected(){
+  const ps=participants.filter(p=>SEL.sea.has(String(p.id))); if(!ps.length) return;
+  const ok=ps.filter(p=>!hasAssess(p)), skip=ps.length-ok.length;
+  if(!ok.length){ alert('All selected participants already have an assessment. Delete that record in Total Records first.'); return; }
+  if(!confirm('Delete '+ok.length+' participant(s) from the list?'+(skip?'\n\n'+skip+' selected participant(s) already have an assessment and will be kept.':'')+'\n\nThis cannot be undone.')) return;
+  if(await bulkRemove('participants',ok.map(p=>p.id))) ok.forEach(p=>SEL.sea.delete(String(p.id)));
+  renderSearch(); fillAssessSel(); fillProfileSel(); renderDash();
+}
+// ---- Register: remove loaded participants by training / unit / department
+function regDelFill(){
+  const box=document.getElementById('regDelBox'); if(!box||!isAdmin) return;
+  [['rd_training','title','All trainings'],['rd_ius','ius','All units'],['rd_dept','department','All departments']].forEach(([id,k,all])=>{
+    const el=document.getElementById(id), cur=el.value, vals=[...new Set(participants.map(p=>String(p[k]||'').trim()).filter(Boolean))].sort();
+    el.innerHTML='<option value="">'+all+'</option>'+vals.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join(''); el.value=vals.includes(cur)?cur:'';
+  });
+  regDelInfo();
+}
+function regDelCandidates(){
+  const g=id=>document.getElementById(id).value;
+  return participants.filter(p=>(!g('rd_training')||String(p.title||'').trim()===g('rd_training'))&&(!g('rd_ius')||String(p.ius||'').trim()===g('rd_ius'))&&(!g('rd_dept')||String(p.department||'').trim()===g('rd_dept'))&&!hasAssess(p));
+}
+function regDelInfo(){ const n=regDelCandidates().length; document.getElementById('rdInfo').textContent=n+' participant(s) match (without an assessment).'; document.getElementById('rdBtn').disabled=!n; }
+async function regDeleteMatching(){
+  const list=regDelCandidates(); if(!list.length){ alert('No participants match.'); return; }
+  if(!confirm('Remove '+list.length+' participant(s) who have no assessment yet?\n\nThis cannot be undone.')) return;
+  await bulkRemove('participants',list.map(p=>p.id)); regDelFill(); renderSearch(); fillAssessSel(); fillProfileSel(); renderDash();
+}
+// ---- Live Session: remove pending (pre-test only) results of a training
+async function liveDeletePending(){
+  const t=document.getElementById('liveTraining').value.trim(); if(!t){ alert('Type or pick the training title above first.'); return; }
+  const list=assessments.filter(a=>a.title===t&&(a.post===''||a.post===undefined||a.post===null));
+  if(!list.length){ alert('No pending Pre-Test records found for “'+t+'”.'); return; }
+  if(!confirm('Delete '+list.length+' pending Pre-Test record(s) of “'+t+'”?\n\nParticipants stay registered. This cannot be undone.')) return;
+  await bulkRemove('assessments',list.map(a=>a.id)); renderLive(); renderRecords(); renderDash();
+}
+{ const _tab=showTab; showTab=function(t){ _tab(t); if(t==='reg') regDelFill(); };
+  const _cur=renderCurrent; renderCurrent=function(){ _cur(); const r=document.getElementById('view-reg'); if(r&&!r.classList.contains('hidden')) regDelFill(); }; }
 setInterval(loadCalendar,15000); // live: everyone's calendar refreshes by itself
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden) loadCalendar(); });
 applyAdminUI(); loadCalendar(true);
