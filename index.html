@@ -104,10 +104,12 @@ details.fold details.fold>summary .cnt{background:var(--violet);}
 </head>
 <body>
 <div id="trainModal" class="modalBack hidden"><div class="modalBox"><h2>⚠ Needs Training</h2><p id="trainModalMsg"></p><p class="def" id="trainModalNote"></p><button class="btn" type="button" onclick="closeTrainModal()">OK</button></div></div>
+<div id="pwModal" class="modalBack hidden"><div class="modalBox"><h2 style="color:var(--text);">Admin login</h2><label>Admin password</label><input id="pw_input" type="password" onkeydown="if(event.key==='Enter')submitAdminLogin()"><div class="def" id="pw_err" style="color:var(--bad);"></div><div style="margin-top:8px;"><button class="btn" type="button" id="pwBtn" onclick="submitAdminLogin()">Log in</button> <button class="btn sec" type="button" onclick="closePw()">Cancel</button></div></div></div>
 <div class="hero"><div class="wrap" style="padding:0;"><span>CENTRAL L&amp;D</span><h1>Serverless Training Effectiveness Tracker</h1></div></div>
 <div class="wrap">
 <div id="chartWarn" class="card hidden" style="color:var(--bad);font-size:.8rem;">Charts library could not load. Please refresh; if it persists, check network access to cdn.jsdelivr.net.</div>
 <div class="syncPill" style="cursor:pointer;" title="Click to sync now" onclick="refreshAll(true)"><span class="syncDot pulse" id="syncDot"></span><span id="syncStatus">Loading data…</span></div>
+<button class="btn sec" type="button" id="adminBtn" onclick="adminBtnClick()" style="margin:0 0 10px 8px;padding:5px 12px;font-size:.75rem;">🔑 Admin login</button>
 <div class="tabs">
   <div class="tab active" data-t="reg">Register</div>
   <div class="tab" data-t="search">Search</div>
@@ -184,7 +186,7 @@ details.fold details.fold>summary .cnt{background:var(--violet);}
         <div><label>Post-Test %</label><input id="postPct" readonly></div>
         <div><label>Learning Index (%)</label><input id="li" readonly></div>
       </div>
-      <label style="display:flex;align-items:center;gap:6px;margin-top:10px;"><input type="checkbox" id="freezePre" onchange="toggleFreeze()" style="width:auto;"> 🔒 Freeze Pre-Test Score for 30 days (Owner) — Post-Test stays locked until then</label>
+      <label id="freezeLabel" style="display:none;align-items:center;gap:6px;margin-top:10px;"><input type="checkbox" id="freezePre" onchange="toggleFreeze()" style="width:auto;"> 🔒 Freeze Pre-Test Score for 30 days (Admin only) — Post-Test stays locked until then</label>
       <p class="def" id="freezeNote" style="display:none;margin-top:4px;">Post-Test is locked for this submission. Come back after the 30-day window and use the <strong>Live Session</strong> tab to upload the Post-Test score.</p>
     </fieldset>
     <fieldset>
@@ -225,7 +227,31 @@ details.fold details.fold>summary .cnt{background:var(--violet);}
   <div id="liveBanner"></div>
   <div class="card">
     <p class="def" style="font-weight:600;margin-bottom:2px;">Upcoming Training Calendar</p>
-    <p class="def">Sample schedule shown for demonstration.</p>
+    <p class="def" id="calNote">Loading calendar…</p>
+    <div id="calAdmin" class="hidden" style="border:1px dashed var(--border);border-radius:8px;padding:10px;margin-bottom:10px;">
+      <p class="def" style="font-weight:600;margin:0 0 6px;">Admin — edit training calendar</p>
+      <input type="hidden" id="cal_id">
+      <div class="grid">
+        <div><label>Training Title</label><input id="cal_title"></div>
+        <div><label>Mode</label><input id="cal_mode" placeholder="Classroom / Virtual / On-the-job"></div>
+        <div><label>Start Date</label><input id="cal_from" type="date"></div>
+        <div><label>End Date</label><input id="cal_to" type="date"></div>
+        <div><label>Trainer</label><input id="cal_trainer"></div>
+        <div><label>Location</label><input id="cal_loc"></div>
+        <div><label>Seats</label><input id="cal_seats" type="number" min="0"></div>
+      </div>
+      <button class="btn" type="button" id="calSaveBtn" onclick="saveCalEntry()">Add to calendar</button>
+      <button class="btn sec" type="button" onclick="resetCalForm()">Clear form</button>
+      <p class="def" style="font-weight:600;margin:12px 0 4px;">Upload calendar from Excel</p>
+      <div class="grid">
+        <div><label>Excel file (.xlsx / .xls / .csv)</label><input type="file" id="calFile" accept=".xlsx,.xls,.csv"></div>
+        <div><label>If the calendar already has entries</label><select id="calMode"><option value="add">Add these to the existing calendar</option><option value="replace">Replace the whole calendar</option></select></div>
+      </div>
+      <button class="btn" type="button" id="calUpBtn" onclick="uploadCalendar()">Upload calendar</button>
+      <button class="btn sec" type="button" onclick="downloadCalTemplate()">Download Excel template</button>
+      <div class="def" id="calMsg" style="margin-top:6px;"></div>
+      <div id="calAdminList" style="margin-top:8px;"></div>
+    </div>
     <div class="calHead"><button class="btn sec" type="button" onclick="calMove(-1)">&lsaquo;</button><b id="calTitle"></b><button class="btn sec" type="button" onclick="calMove(1)">&rsaquo;</button></div>
     <div class="calGrid" id="calGrid"></div>
     <div id="calList" style="margin-top:10px;"></div>
@@ -311,6 +337,7 @@ function calcDuration(){
 }
 
 const API_URL = "https://script.google.com/macros/s/AKfycby_1i6lb3MCSQhibQOvNY6MZ1_v4N9keJk8_dseraVYpDCMTP5olmblUElk69n2kE2D/exec";
+let adminKey='', isAdmin=false; try{ adminKey=sessionStorage.getItem('ptd_admin')||''; isAdmin=!!adminKey; }catch(e){}
 let participants=[], assessments=[], isRefreshing=false, firstLoadDone=false;
 function setStatus(msg, state){
   const el=document.getElementById('syncStatus'); if(el) el.textContent=msg;
@@ -378,6 +405,7 @@ let syncTimer=null;
 function scheduleSync(){ clearTimeout(syncTimer); syncTimer=setTimeout(()=>refreshAll(true),2500); }
 // Apps Script serves many users at once and sometimes answers "busy" (or an HTML error page). Retry politely.
 async function postJSON(body, idempotent){
+  if(isAdmin && adminKey && !body.key) body.key=adminKey; // admin actions are checked on the server
   for(let attempt=0; attempt<4; attempt++){
     try{
       const r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)});
@@ -882,7 +910,7 @@ const SAMPLE_TRAININGS=[
  {t:'Machine Operation - CNC Basics',o:27,d:4,m:'Classroom',tr:'K. Reddy',loc:'Training Hall A',s:16}];
 function sampleSessions(){ const t0=new Date(); t0.setHours(0,0,0,0);
   return SAMPLE_TRAININGS.map(x=>{ const f=new Date(t0); f.setDate(f.getDate()+x.o); const e=new Date(f); e.setDate(e.getDate()+x.d-1); return Object.assign({from:f,to:e},x); }); }
-let SESS=sampleSessions(), calMonth=new Date(); calMonth.setDate(1);
+let SESS=[], calMonth=new Date(); calMonth.setDate(1);
 function calMove(n){ calMonth.setMonth(calMonth.getMonth()+n); renderCalendar(); }
 function renderCalendar(){
   const today=new Date(); today.setHours(0,0,0,0);
@@ -911,7 +939,7 @@ function useSession(i){
   document.getElementById('liveTraining').scrollIntoView({behavior:'smooth',block:'center'});
 }
 function renderLive(){
-  const trainings=[...new Set(participants.map(p=>p.title).concat(SAMPLE_TRAININGS.map(x=>x.t)).filter(Boolean))];
+  const trainings=[...new Set(participants.map(p=>p.title).concat(SESS.map(x=>x.t)).filter(Boolean))];
   const dl=document.getElementById('trainingList');
   if(dl) dl.innerHTML=trainings.map(t=>`<option value="${esc(t)}">`).join('');
   renderCalendar();
@@ -973,8 +1001,8 @@ async function uploadLiveResults(){
         if(a){ await apiUpdate('assessments',a.id,{pre:it.val,prePct:it.pct}); a.pre=it.val; a.prePct=it.pct; }
         else{
           const rec={participantId:p.id,pname:p.pname,department:p.department||'',title:training,pre:it.val,post:'',prePct:it.pct,postPct:'',li:'',
-            ratings:[],avgRating:'',result:'Pending',assessDate:date,assessedBy:'Live Session',ts:Date.now(),lockEnabled:true,
-            unlockDate:new Date(new Date(date).getTime()+30*864e5).toISOString()};
+            ratings:[],avgRating:'',result:'Pending',assessDate:date,assessedBy:'Live Session',ts:Date.now(),lockEnabled:isAdmin,
+            unlockDate:isAdmin?new Date(new Date(date).getTime()+30*864e5).toISOString():''};
           const res=await apiAdd('assessments',rec);
           if(!res||!res.ok){ skipped++; tick(); return; }
           assessments.push(Object.assign({id:res.id},rec));
@@ -1005,6 +1033,130 @@ async function uploadLiveResults(){
   document.getElementById('liveBanner').innerHTML=bannerRows.length?'<div class="card"><p class="def" style="font-weight:600;margin-bottom:6px;">'+(type==='pre'?'Pre-Test Results':'Post-Test Results — Learning Index')+'</p>'+bannerRows.join('')+'</div>':'';
   renderAllViews(); renderLive(); saveCache();
 }
+
+// ===== Admin login · admin-only freeze · live training calendar =====
+const p2=n=>String(n).padStart(2,'0');
+let CALROWS=[], calSig='', calLoaded=false;
+function applyAdminUI(){
+  const b=document.getElementById('adminBtn'); if(b) b.textContent=isAdmin?'🔓 Admin — log out':'🔑 Admin login';
+  const fl=document.getElementById('freezeLabel'); if(fl) fl.style.display=isAdmin?'flex':'none';
+  const ca=document.getElementById('calAdmin'); if(ca) ca.classList.toggle('hidden',!isAdmin);
+  renderCalAdmin(); updateCalNote();
+}
+function adminBtnClick(){ if(isAdmin) adminLogout(); else { document.getElementById('pw_input').value=''; document.getElementById('pw_err').textContent=''; document.getElementById('pwModal').classList.remove('hidden'); document.getElementById('pw_input').focus(); } }
+function closePw(){ document.getElementById('pwModal').classList.add('hidden'); }
+function adminLogout(){ isAdmin=false; adminKey=''; try{ sessionStorage.removeItem('ptd_admin'); }catch(e){} applyAdminUI(); }
+function adminLost(){ alert('Admin session is not valid. Please log in again.'); adminLogout(); }
+async function submitAdminLogin(){
+  const key=document.getElementById('pw_input').value, err=document.getElementById('pw_err'), btn=document.getElementById('pwBtn');
+  if(!key){ err.textContent='Enter the admin password.'; return; }
+  btn.disabled=true; err.textContent='Checking…';
+  const r=await postJSON({action:'verify',key},true);
+  btn.disabled=false;
+  if(r&&r.ok){ adminKey=key; isAdmin=true; try{ sessionStorage.setItem('ptd_admin',key); }catch(e){} closePw(); applyAdminUI(); return; }
+  err.textContent = !r? 'Could not reach the server — try again.' : r.error==='unauthorized'? 'Wrong password.' : r.error==='unknown action'? 'The Google Script is not updated yet — redeploy it.' : 'Admin login is not available ('+r.error+').';
+}
+function calDate(v){ const s=String(v||'').trim(), m=s.match(/^(\d{4})-(\d{2})-(\d{2})/); if(m) return new Date(+m[1],+m[2]-1,+m[3]); const d=new Date(s); return isNaN(d)?null:new Date(d.getFullYear(),d.getMonth(),d.getDate()); }
+function updateCalNote(){
+  const n=document.getElementById('calNote'); if(!n) return;
+  n.textContent = !calLoaded? 'Loading calendar…' : SESS.length? 'Live schedule — updates automatically for everyone.' : 'No trainings scheduled yet.'+(isAdmin?' Add one below or upload an Excel calendar.':'');
+}
+async function loadCalendar(force){
+  if(document.hidden && calLoaded && !force) return;
+  let rows; try{ const r=await fetch(API_URL+'?type=calendar'); rows=await r.json(); }catch(e){ return; }
+  if(!Array.isArray(rows)) return;
+  const sig=JSON.stringify(rows); if(sig===calSig && calLoaded) return; calSig=sig; CALROWS=rows;
+  SESS=rows.map(r=>{ const from=calDate(r.fromDate), to=calDate(r.toDate)||from; if(!from) return null;
+    return {id:r.id,t:r.title||'',m:r.mode||'',tr:r.trainer||'',loc:r.location||'',s:(r.seats===''||r.seats==null)?'—':r.seats,from,to,d:Math.round((to-from)/864e5)+1,o:0}; })
+    .filter(Boolean).sort((a,b)=>a.from-b.from);
+  calLoaded=true; renderLive(); renderCalAdmin(); updateCalNote();
+}
+function renderCalAdmin(){
+  const box=document.getElementById('calAdminList'); if(!box) return;
+  if(!isAdmin||!SESS.length){ box.innerHTML=''; return; }
+  box.innerHTML='<p class="def" style="font-weight:600;margin:0 0 2px;">Entries ('+SESS.length+')</p>'+SESS.map(x=>`<div class="sessRow"><span><strong>${esc(x.t)}</strong><br><span class="def">${fmtDate(x.from)}${x.d>1?' – '+fmtDate(x.to):''} · ${esc(x.m)} · ${esc(x.tr)} · ${esc(x.loc)} · ${esc(x.s)} seats</span></span><span><button class="btn" type="button" onclick="editCalEntry('${esc(x.id)}')">Edit</button> <button class="btn danger" type="button" onclick="deleteCalEntry('${esc(x.id)}')">Delete</button></span></div>`).join('')+'<button class="btn danger" type="button" style="margin-top:8px;" onclick="clearCalendar()">Delete whole calendar</button>';
+}
+function resetCalForm(){ ['cal_id','cal_title','cal_mode','cal_from','cal_to','cal_trainer','cal_loc','cal_seats'].forEach(i=>document.getElementById(i).value=''); document.getElementById('calSaveBtn').textContent='Add to calendar'; }
+function editCalEntry(id){
+  const r=CALROWS.find(x=>String(x.id)===String(id)); if(!r) return;
+  const f=calDate(r.fromDate), t=calDate(r.toDate);
+  const set=(k,v)=>document.getElementById(k).value=v==null?'':v;
+  set('cal_id',r.id); set('cal_title',r.title); set('cal_mode',r.mode); set('cal_from',f?iso(f):''); set('cal_to',t?iso(t):''); set('cal_trainer',r.trainer); set('cal_loc',r.location); set('cal_seats',r.seats);
+  document.getElementById('calSaveBtn').textContent='Save changes'; document.getElementById('cal_title').scrollIntoView({behavior:'smooth',block:'center'});
+}
+function calDone(res,okMsg){
+  const m=document.getElementById('calMsg');
+  if(res&&res.ok){ m.textContent=okMsg; loadCalendar(true); return true; }
+  if(res&&(res.error==='unauthorized'||res.error==='admin not set')){ adminLost(); return false; }
+  m.textContent='Could not save — '+((res&&res.error)||'check your connection')+'.'; return false;
+}
+async function saveCalEntry(){
+  if(!isAdmin) return;
+  const v=i=>document.getElementById(i).value.trim();
+  const rec={title:v('cal_title'),mode:v('cal_mode'),fromDate:v('cal_from'),toDate:v('cal_to')||v('cal_from'),trainer:v('cal_trainer'),location:v('cal_loc'),seats:v('cal_seats'),ts:Date.now()};
+  if(!rec.title||!rec.fromDate){ alert('Enter the training title and the start date.'); return; }
+  if(rec.toDate<rec.fromDate){ alert('The end date is before the start date.'); return; }
+  const id=v('cal_id'), btn=document.getElementById('calSaveBtn'); btn.disabled=true;
+  const res=id? await postJSON({type:'calendar',action:'update',id,data:rec},true) : await postJSON({type:'calendar',action:'add',data:rec},false);
+  btn.disabled=false; if(calDone(res,id?'Changes saved.':'Added to the calendar.')) resetCalForm();
+}
+async function deleteCalEntry(id){
+  const r=CALROWS.find(x=>String(x.id)===String(id)); if(!r||!confirm('Delete “'+r.title+'” from the calendar?')) return;
+  calDone(await postJSON({type:'calendar',action:'delete',id},true),'Entry deleted.');
+}
+async function clearCalendar(){
+  if(!confirm('Delete ALL entries from the training calendar?\n\nThis cannot be undone.')) return;
+  calDone(await postJSON({type:'calendar',action:'replace',data:[]},true),'Calendar cleared.');
+}
+function xlDate(v){
+  if(v===''||v==null) return '';
+  if(typeof v==='number'){ const d=new Date(Math.round((v-25569)*864e5)); return d.getUTCFullYear()+'-'+p2(d.getUTCMonth()+1)+'-'+p2(d.getUTCDate()); }
+  const s=String(v).trim(); let m=s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/); if(m) return m[1]+'-'+p2(m[2])+'-'+p2(m[3]);
+  m=s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})/); if(m){ let y=+m[3]; if(y<100) y+=2000; return y+'-'+p2(m[2])+'-'+p2(m[1]); }
+  const d=new Date(s); return isNaN(d)?'':iso(d);
+}
+async function uploadCalendar(){
+  if(!isAdmin) return;
+  const f=document.getElementById('calFile').files[0], msg=document.getElementById('calMsg'), btn=document.getElementById('calUpBtn');
+  if(!f){ alert('Choose an Excel file first.'); return; }
+  if(typeof XLSX==='undefined'){ alert('The Excel reader did not load. Check your internet connection and reload.'); return; }
+  btn.disabled=true; msg.textContent='Reading file…';
+  try{
+    const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+    const recs=[], bad=[], now=Date.now();
+    rows.forEach((row,i)=>{
+      const title=String(pick(row,['training title','title','training','training topic','topic'])||'').trim();
+      const from=xlDate(pick(row,['start date','from date','from','start']));
+      const to=xlDate(pick(row,['end date','to date','to','end']))||from;
+      if(!title&&!from) return;
+      if(!title||!from){ bad.push(i+2); return; }
+      recs.push({title,mode:String(pick(row,['mode'])||'').trim(),fromDate:from,toDate:to<from?from:to,trainer:String(pick(row,['trainer','trainer name'])||'').trim(),location:String(pick(row,['location','venue'])||'').trim(),seats:pick(row,['seats','capacity','participants']),ts:now});
+    });
+    if(!recs.length){ msg.textContent='No valid rows found. Each row needs a Training Title and a Start Date (see the template).'; btn.disabled=false; return; }
+    const replace=document.getElementById('calMode').value==='replace';
+    if(replace&&recs.length>500){ msg.textContent='Too many rows (max 500).'; btn.disabled=false; return; }
+    if(replace&&!confirm('Replace the whole calendar with these '+recs.length+' entries?')){ msg.textContent=''; btn.disabled=false; return; }
+    let res; msg.textContent='Uploading '+recs.length+' entries…';
+    if(replace) res=await postJSON({type:'calendar',action:'replace',data:recs},true);
+    else for(let i=0;i<recs.length;i+=400){ res=await postJSON({type:'calendar',action:'addMany',data:recs.slice(i,i+400)},false); if(!res||!res.ok) break; }
+    if(calDone(res,(replace?'Calendar replaced: ':'Added: ')+recs.length+' training(s).'+(bad.length?' Skipped rows with a missing title/start date: '+bad.join(', ')+'.':''))) document.getElementById('calFile').value='';
+  }catch(e){ console.error(e); msg.textContent='Could not read that file.'; }
+  btn.disabled=false;
+}
+function downloadCalTemplate(){
+  if(typeof XLSX==='undefined'){ alert('The Excel library did not load. Reload the page and try again.'); return; }
+  const ws=XLSX.utils.aoa_to_sheet([['Training Title','Mode','Start Date','End Date','Trainer','Location','Seats'],
+    ['Welder Upskilling Training','Classroom','2026-11-09','2026-11-14','Mr. A. Kumar','Training Hall A',25],
+    ['Safe Work Practices','On-the-job','2026-11-20','2026-11-20','Ms. P. Nair','Unit 2 Site',15]]);
+  ws['!cols']=[{wch:32},{wch:16},{wch:12},{wch:12},{wch:22},{wch:22},{wch:8}];
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Training Calendar');
+  const url=URL.createObjectURL(new Blob([XLSX.write(wb,{type:'array',bookType:'xlsx'})],{type:'application/octet-stream'}));
+  const a=document.createElement('a'); a.href=url; a.download='Training_Calendar_Template.xlsx'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+setInterval(loadCalendar,15000); // live: everyone's calendar refreshes by itself
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) loadCalendar(); });
+applyAdminUI(); loadCalendar(true);
 </script>
 
 </body>
