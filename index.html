@@ -150,7 +150,8 @@ details.fold details.fold>summary .cnt{background:var(--violet);}
     <fieldset>
       <legend>Bulk Upload Participants (Excel)</legend>
       <p class="def">Upload an .xlsx with participant columns (Name, ID No., Category, Department, IUs/GUs, Contractor). If your file also has its own Training Topic / From Date / To Date / Venue / Trainer columns, those are used per row automatically — otherwise the Training Details filled in above apply to every row. Multiple sheets in one file are all read; a title/banner row above your real headers is detected and skipped automatically.</p>
-      <input type="file" id="bulkFile" accept=".xlsx,.xls">
+      <input type="file" id="bulkFile" accept=".xlsx,.xls" onchange="readBulkFile()">
+      <div id="bulkFilters"></div>
       <button type="button" class="btn" id="bulkUploadBtn" onclick="bulkUpload()">Upload & Add All</button>
       <div id="bulkMsg" class="def"></div>
     </fieldset>
@@ -520,6 +521,68 @@ function toDateStr(v){
   if(v instanceof Date && !isNaN(v)) return v.toISOString().slice(0,10);
   return v||'';
 }
+let BU={recs:[],rows:0,heads:[]}, BUSEL={};
+const BU_FILTERS=[['title','Training'],['_sheet','Sheet'],['ius','Unit (IUs / GUs)'],['department','Department'],['category','Category'],['contractor','Contractor']];
+async function parseBulkFile(f){
+  const wb = XLSX.read(await f.arrayBuffer(),{type:'array', cellDates:true});
+  const nameOf = row => pick(row,['employee / cwm name','name','employee name','full name','participant name','cwm name']) || pickFuzzy(row,['name']);
+  const items=[];
+  wb.SheetNames.forEach(sn=>{ const ws=wb.Sheets[sn]; XLSX.utils.sheet_to_json(ws,{range:findHeaderRow(ws), defval:''}).forEach(row=>items.push({row,sn})); });
+  const recs=items.map(({row,sn})=>({
+    _sheet:sn,
+    _title:pick(row,['training topic','training title','title']),
+    _from:pick(row,['from date']), _to:pick(row,['to date']),
+    _trainer:pick(row,['trainer']) || pickFuzzy(row,['faculty']),
+    _venue:pick(row,['venue','location']),
+    _duration:pick(row,['duration']) || pickFuzzy(row,['mandays']),
+    pname:nameOf(row),
+    pid:pick(row,['id no.','id no','id']) || pickFuzzy(row,['id']),
+    category:pick(row,['category']) || pickFuzzy(row,['category']),
+    department:pick(row,['department','department ']) || pickFuzzy(row,['dept','department']),
+    ius:pick(row,['ius / gus','ius/gus','ius','unit','gus']) || pickFuzzy(row,['unit','ius','gus']),
+    contractor:pick(row,['contractor for cwm','contractor']) || pickFuzzy(row,['contractor','contactor'])
+  }));
+  return {recs, rows:items.length, heads:items[0]?Object.keys(items[0].row):[]};
+}
+function buVal(r,k){ return k==='title'? String(r._title||title.value||'').trim() : String(r[k]||'').trim(); }
+function buMatch(r){
+  for(const f of BU_FILTERS){ const k=f[0], sel=BUSEL[k]; if(sel&&sel!=='__all__'&&(buVal(r,k)||'__blank__')!==sel) return false; }
+  const q=(BUSEL.q||'').trim().toLowerCase();
+  return !q || [r.pname,r.pid].some(v=>String(v||'').toLowerCase().includes(q));
+}
+function buInfo(){
+  const el=document.getElementById('bulkMatchInfo'); if(!el) return;
+  const named=BU.recs.filter(r=>r.pname);
+  el.innerHTML='<b>'+named.filter(buMatch).length+'</b> of '+named.length+' rows match — only these will be uploaded.';
+}
+function buSet(k,v){ BUSEL[k]=v; buInfo(); }
+function buildBulkFilters(){
+  const box=document.getElementById('bulkFilters'), recs=BU.recs.filter(r=>r.pname);
+  if(!recs.length){ box.innerHTML=''; return; }
+  let html='<div class="def" style="margin-top:10px;font-weight:600;">Filter before uploading</div><div class="grid">';
+  BU_FILTERS.forEach(f=>{
+    const k=f[0], cnt=new Map();
+    recs.forEach(r=>{ const v=buVal(r,k)||'__blank__'; cnt.set(v,(cnt.get(v)||0)+1); });
+    if(cnt.size<2){ delete BUSEL[k]; return; }   // nothing to choose between
+    const cur=BUSEL[k]||'__all__';
+    html+='<div><label>'+f[1]+'</label><select onchange="buSet(\''+k+'\',this.value)"><option value="__all__">All ('+recs.length+')</option>'
+      +[...cnt].sort((a,b)=>a[0].localeCompare(b[0])).map(([v,n])=>'<option value="'+esc(v)+'"'+(v===cur?' selected':'')+'>'+(v==='__blank__'?'(blank)':esc(v))+' ('+n+')</option>').join('')+'</select></div>';
+  });
+  html+='<div><label>Name / ID contains</label><input type="search" value="'+esc(BUSEL.q||'')+'" oninput="buSet(\'q\',this.value)"></div></div><div class="def" id="bulkMatchInfo"></div>';
+  box.innerHTML=html; buInfo();
+}
+async function readBulkFile(){
+  const f=document.getElementById('bulkFile').files[0], msg=document.getElementById('bulkMsg');
+  BU={recs:[],rows:0,heads:[]}; BUSEL={}; buildBulkFilters(); msg.textContent='';
+  if(!f) return;
+  if(typeof XLSX==='undefined'){ msg.textContent='The Excel reader did not load. Check your internet connection and reload the page.'; return; }
+  msg.textContent='Reading file…';
+  try{ BU=await parseBulkFile(f); }catch(e){ console.error(e); msg.textContent='Could not read this file. Please use an .xlsx file.'; return; }
+  const named=BU.recs.filter(r=>r.pname).length;
+  if(!named){ msg.innerHTML='No participants found — couldn\'t find a Name column. Detected column headers: <strong>'+BU.heads.join(', ')+'</strong>.'; return; }
+  buildBulkFilters();
+  msg.textContent='File read — '+named+' participant row(s). Use the filters above the button to upload only some of them. Nothing is saved until you press “Upload & Add All”.';
+}
 async function bulkUpload(){
   const btn = document.getElementById('bulkUploadBtn');
   if(btn.disabled) return;
@@ -527,46 +590,25 @@ async function bulkUpload(){
   if(!f){ alert('Choose an Excel file first.'); return; }
   btn.disabled = true; const oldText = btn.textContent;
   btn.classList.add('progress'); btn.style.setProperty('--p','0%'); btn.textContent='Reading file…';
-  const buf = await f.arrayBuffer();
-  const wb = XLSX.read(buf,{type:'array', cellDates:true});
-  const nameOf = row => pick(row,['employee / cwm name','name','employee name','full name','participant name','cwm name'])
-      || pickFuzzy(row,['name']);
-
-  let allRows=[];
-  wb.SheetNames.forEach(sn=>{
-    const ws = wb.Sheets[sn];
-    const headerRow = findHeaderRow(ws);
-    allRows = allRows.concat(XLSX.utils.sheet_to_json(ws,{range:headerRow, defval:''}));
-  });
-
-  const allRecs = allRows.map(row=>{
-    const rowTitle = pick(row,['training topic','training title','title']);
-    const rowFrom = pick(row,['from date']);
-    const rowTo = pick(row,['to date']);
-    const rowTrainer = pick(row,['trainer']) || pickFuzzy(row,['faculty']);
-    const rowVenue = pick(row,['venue','location']);
-    const rowDuration = pick(row,['duration']) || pickFuzzy(row,['mandays']);
-    return {
-      title: rowTitle || title.value,
-      mode: mode.value,
-      fromDate: rowFrom ? toDateStr(rowFrom) : fromDate.value,
-      toDate: rowTo ? toDateStr(rowTo) : toDate.value,
-      duration: rowDuration || duration.value,
-      trainer: rowTrainer || trainer.value,
-      location: rowVenue || location.value,
-      pname: nameOf(row),
-      pid: pick(row,['id no.','id no','id']) || pickFuzzy(row,['id']),
-      category: pick(row,['category']) || pickFuzzy(row,['category']),
-      department: pick(row,['department','department ']) || pickFuzzy(row,['dept','department']),
-      ius: pick(row,['ius / gus','ius/gus','ius','unit','gus']) || pickFuzzy(row,['unit','ius','gus']),
-      contractor: pick(row,['contractor for cwm','contractor']) || pickFuzzy(row,['contractor','contactor']),
-      ts: Date.now()
-    };
-  });
-  const recs = allRecs.filter(r=>r.pname);
-  if(allRows.length && recs.length===0){
+  const resetBtn=()=>{ btn.disabled = false; btn.textContent = oldText; btn.classList.remove('progress'); btn.style.removeProperty('--p'); };
+  if(!BU.recs.length){ try{ BU = await parseBulkFile(f); }catch(e){ console.error(e); resetBtn(); document.getElementById('bulkMsg').textContent='Could not read this file. Please use an .xlsx file.'; return; } }
+  const named = BU.recs.filter(r=>r.pname), noName = BU.recs.length-named.length;
+  const picked = named.filter(buMatch), filtered = named.length-picked.length;   // only rows that pass the filters are uploaded
+  if(named.length && !picked.length){ resetBtn(); document.getElementById('bulkMsg').textContent='No rows match the current filters — change the filters above.'; return; }
+  const recs = picked.map(r=>({
+    title: r._title || title.value,
+    mode: mode.value,
+    fromDate: r._from ? toDateStr(r._from) : fromDate.value,
+    toDate: r._to ? toDateStr(r._to) : toDate.value,
+    duration: r._duration || duration.value,
+    trainer: r._trainer || trainer.value,
+    location: r._venue || location.value,
+    pname: r.pname, pid: r.pid, category: r.category, department: r.department, ius: r.ius, contractor: r.contractor,
+    ts: Date.now()
+  }));
+  if(BU.rows && recs.length===0){
     btn.disabled = false; btn.textContent = oldText; btn.classList.remove('progress');
-    const headers = allRows[0] ? Object.keys(allRows[0]) : [];
+    const headers = BU.heads;
     document.getElementById('bulkMsg').innerHTML = '0 participant(s) added — couldn\'t find a Name column. '
       + 'Detected column headers: <strong>' + headers.join(', ') + '</strong>. '
       + 'Rename one of them to "Name" (or "Employee Name") and try again.';
@@ -596,8 +638,8 @@ async function bulkUpload(){
     failed+=chunk.length; progress(chunk.length);
   }, 3);
   btn.disabled = false; btn.textContent = oldText; btn.classList.remove('progress'); btn.style.removeProperty('--p');
-  document.getElementById('bulkFile').value = '';
-  document.getElementById('bulkMsg').textContent = n+' participant(s) added'+(failed?', '+failed+' failed':'')+(allRows.length>recs.length? ', '+(allRows.length-recs.length)+' skipped (no name found)':'')+'.';
+  document.getElementById('bulkFile').value = ''; BU={recs:[],rows:0,heads:[]}; BUSEL={}; buildBulkFilters();
+  document.getElementById('bulkMsg').textContent = n+' participant(s) added'+(failed?', '+failed+' failed':'')+(filtered? ', '+filtered+' left out by the filters':'')+(noName? ', '+noName+' skipped (no name found)':'')+'.';
   fillAssessSel(); renderSearch(); fillProfileSel(); renderDash(); saveCache();
 }
 
